@@ -267,3 +267,17 @@ Stage Summary:
 - Hero now reads as a poster shot: BIG car filling the lower half, suspension bridge + skyline towers centered in the middle band of the 360° background, wheels welded to the lot asphalt by the cast shadow + contact blob.
 - Scroll-track geometry reminder for future sessions: track 300vh → scrollHeight 3960 @900px viewport → scrollable 3060 (progress = scrollY/3060). Mobile scrollable 2870 @844px.
 - Production still awaiting Vercel re-auth; commits c998738 → d55bd7b → 4a3df46 are ready to ship together.
+
+---
+Task ID: 12
+Agent: Z.ai Code (main agent)
+Task: Deploy the pending commits (c998738 camera v9, d55bd7b smoke removal + contact blob, 4a3df46 hero v10) to Vercel production using the user-provided token.
+
+Work Log:
+- User supplied a Vercel token after the Task 9/10/11 auth blockage; `bunx vercel whoami --token …` → account `8krm`.
+- `bunx vercel deploy --prod --token …` → build completed in 17s, Ready in 33s, aliased to https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-97454dzgh-…).
+- Live verification via agent-browser 1440×900 on the production URL: hero = big car with bridge+skyline mid-background, grounded; front dwell (0.389) grounded on lined asphalt with zero drift smoke; rear dwell (0.80) grounded against the bridge district; no page errors. HTTP 200 on the domain.
+
+Stage Summary:
+- ALL pending work is now LIVE at https://bmw-m5-cs-vert.vercel.app — Task 9 wide-lens close-ups, Task 10 drift-smoke/glow removal + contact-shadow grounding, Task 11 hero reframing (big car, city mid-background).
+- Token handled per user message; consider rotating it if it was shared unintentionally.
