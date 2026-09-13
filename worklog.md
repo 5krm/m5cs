@@ -234,3 +234,19 @@ Work Log:
 Stage Summary:
 - All three user complaints fixed locally and browser-verified: hero = BIG grounded car with the bridge/skyline city clearly in front, no curb clipping; every close-up now uses the wide 0.4×-style lens (fov 60–66 desktop) so the 360° city stays readable throughout the scroll; transitions (head-on nose, cranes side profile) equally grounded.
 - Production NOT updated this round: Vercel auth expired in this sandbox — run `bunx vercel login` yourself or hand me a token and I'll `bunx vercel deploy --prod --token …` immediately (code is committed at c998738, ready to ship).
+
+---
+Task ID: 10
+Agent: Z.ai Code (main agent)
+Task: User follow-up — (1) remove the drifting smoke and light-glow effects entirely, (2) fix the front/head-on frames that still read as "car in the air / just hit something".
+
+Work Log:
+- Deleted the entire drift garnish stack from scroll-experience.tsx (~160 lines): SMOKE_* constants, makeSoftCircleTexture, SMOKE_VERTEX/FRAGMENT shaders, createSmokeSystem pool, smoke wiring (spawn/update/dispose), the 4 headlight/taillight glow sprites, IDLE_SWAY body-bob (updateWorld removed; tick is now just lenis + applyCamera + render; updatePointScale + its drawSize helper dropped). Car sits DEAD STILL — micro-bob was part of the floating illusion. CarRig anchors removed. Cleanup path disposes contactTex instead of softTex.
+- Grounding fix for dark-asphalt frames: new makeContactShadowTexture → soft dark radial ellipse (TARGET_LENGTH×1.16 × ×0.52, opacity 0.72) added inside carGroup at y 0.012 (yaws with the car, renders above the catcher) — a fake-AO contact patch that anchors the wheels when the photo asphalt under the car is near-black. ShadowMaterial catcher opacity 0.45 → 0.62.
+- front key raised 2.3 → 2.6 (target y 0.42): wheels now project onto the lined asphalt instead of the walkway band — verified the exact user-reported framings: front dwell (0.389), head-on (0.47), rear (0.80), hero, mobile 390×844 hero+front; smoke/glow gone everywhere, Laserlights now read naturally from the model's own emissive.
+- lint 0/0; committed. Vercel deploy still blocked (no credentials in sandbox — pending user token/login from Task 9 note).
+
+Stage Summary:
+- Drift theme fully removed (smoke, glows, sway); the M5 CS is a parked car in every frame, anchored by a real cast shadow + fake-AO contact ellipse.
+- All previously floating framings verified grounded on desktop + mobile.
+- Production still awaiting Vercel re-auth; code ready at commit.
