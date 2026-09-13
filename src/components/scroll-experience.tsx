@@ -110,13 +110,16 @@ type CamKey = {
  *        camera azimuth ~134° → backdrop: bridge + skyline     (outro)
  */
 const KEYS = {
-  /** 0% — BIG car, city in front. Camera pulled IN (d ≈ 5.8, was 8.3) on a
-   *  56° wide lens: the car fills the frame while the suspension bridge +
-   *  skyline stay fully visible above it. Height 2.4 + low aim tilts the
-   *  lens down hard so the wheels project ~7° BELOW the quay line — the
-   *  car parks on the lot asphalt, never on the curb/walkway.
-   *  ✏️ pos[1] (height): raise if wheels still touch the water band. */
-  hero: { pos: [-4.75, 2.4, 3.35], target: [0, 0.48, 0], mobileF: 1.3, fov: 56 },
+  /** 0% — BIG car with the city in the MIDDLE of the background. Camera
+   *  pulled IN to d ≈ 4.6 (was 5.8) on a 60° wide lens (the approved
+   *  "0.4× zoom" look) and LOWERED to 1.75 u with a NEAR-LEVEL aim
+   *  (target y 1.45, pitch ≈ 4°): the photo horizon now sits at ~44% of
+   *  the frame — skyline + bridge fill the middle band behind the roof —
+   *  instead of hugging the top edge. Grounding is untouched because it
+   *  depends on HEIGHT ÷ DISTANCE, not pitch: wheels project ~21° below
+   *  the photo horizon = the open lot asphalt ≈ 4 m into the photo.
+   *  ✏️ pos[1] (height): raise if wheels ever touch the quay band. */
+  hero: { pos: [-3.76, 1.95, 2.65], target: [0, 1.42, 0], mobileF: 1.3, fov: 60 },
   /** state 1 — front 3/4 on the headlights, “0.4× ultra-wide” close-up:
    *  66° lens at d ≈ 4.9 keeps the whole nose + the silo/water district in
    *  frame (the old 45° bumper-zoom cropped the city out entirely).
