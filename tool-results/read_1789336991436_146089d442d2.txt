@@ -1,0 +1,912 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→/**
+     4→     4→ * ═════════════════════════════════════════════════════════════════════════
+     5→     5→ * ScrollExperience — scroll-driven 3D camera inspection (gray BMW M5 CS)
+     6→     6→ * ═════════════════════════════════════════════════════════════════════════
+     7→     7→ * Stack: vanilla three.js · GSAP + ScrollTrigger (scrub 1.2) · Lenis
+     8→     8→ *
+     9→     9→ * Choreography (scrubbed 1:1 with scroll — reverses fluidly when scrolling
+    10→    10→ * back up, because everything is one timeline driven by ScrollTrigger):
+    11→    11→ *
+    12→    12→ *   progress   camera move                          overlay
+    13→    13→ *   ─────────────────────────────────────────────────────────────────────
+    14→    14→ *   0.00–0.30  HERO → FRONT   wide drift pose →    hero copy fades out
+    15→    15→ *                             low, tight nose      front caption in/out
+    16→    16→ *   0.42–0.72  FRONT → REAR   sweep along flank    rear caption in/out
+    17→    17→ *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
+    18→    18→ *
+    19→    19→ * The "pinned viewport" is a fixed full-viewport stage (canvas + UI
+    20→    20→ * overlay) driven by an invisible 440vh scroll track — functionally a
+    21→    21→ * ScrollTrigger pin, but perfectly jitter-free with Lenis on every browser.
+    22→    22→ */
+    23→    23→
+    24→    24→import { useEffect, useRef } from 'react'
+    25→    25→import type { CSSProperties } from 'react'
+    26→    26→import Image from 'next/image'
+    27→    27→import * as THREE from 'three'
+    28→    28→import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+    29→    29→import gsap from 'gsap'
+    30→    30→import { ScrollTrigger } from 'gsap/ScrollTrigger'
+    31→    31→import Lenis from 'lenis'
+    32→    32→import 'lenis/dist/lenis.css'
+    33→    33→
+    34→    34→/* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
+    35→    35→
+    36→    36→const MODEL_URL = '/models/bmw-m5-cs/scene.gltf' // CC-BY-4.0 · fvrenbld
+    37→    37→const TARGET_LENGTH = 4.6 // car is normalized to this world length
+    38→    38→const FLIP_MODEL = false // set true if a swapped model faces backwards
+    39→    39→
+    40→    40→/* 360° equirectangular panorama — night city across a lake (user-provided).
+    41→    41→ * ONE texture drives BOTH the visible backdrop (scene.background) and the
+    42→    42→ * image-based lighting (PMREM → scene.environment). */
+    43→    43→const ENV_URL = '/environment/night_city_lake_360.jpg'
+    44→    44→/** ✏️ Yaw of the panorama (rad). Places the skyline behind the hero camera,
+    45→    45→ * the suspension bridge behind the rear shot and the port cranes behind the
+    46→    46→ * front close-up. Background & environment rotations stay identical so the
+    47→    47→ * paint reflections always match the visible backdrop. */
+    48→    48→const ENV_ROTATION_Y = -0.19
+    49→    49→/** ✏️ Pitch of the panorama (rad) — nudges the photographic ground plane up
+    50→    50→ * under the car so the 3D floor (y = 0) visually coincides with the wet
+    51→    51→ * asphalt in the photo. Match on both background & environment. */
+    52→    52→const BACKDROP_PITCH_X = 0.12
+    53→    53→
+    54→    54→/* ═══════════ 2. CAMERA KEYFRAMES — ✏️ EDIT HERE ══════════════════════
+    55→    55→ * World space: car sits at the origin, nose pointing +X, ~4.6 units long,
+    56→    56→ * ~1.45 tall; the ground plane is y = 0.
+    57→    57→ *
+    58→    58→ *   pos[]    camera position [x, y, z]
+    59→    59→ *   target[] lookAt target [x, y, z] — tracked via camera.lookAt() in the
+    60→    60→ *            render loop so target tracking stays perfectly fluid
+    61→    61→ *   mobileF  camera-distance multiplier on portrait screens (mobile also
+    62→    62→ *            widens FOV 45 → 60, see FOV_*). The offset from pos → target
+    63→    63→ *            is scaled by this factor, so the framing angle is preserved.
+    64→    64→ */
+    65→    65→type Vec3 = [number, number, number]
+    66→    66→type CamKey = {
+    67→    67→  pos: Vec3
+    68→    68→  target: Vec3
+    69→    69→  mobileF: number
+    70→    70→  /** portrait only: multiplies the lateral (z) camera offset again so the
+    71→    71→   *  close-ups read more head-on — keeps the car flank out of the frame */
+    72→    72→  mobileHeadOn?: number
+    73→    73→}
+    74→    74→
+    75→    75→const KEYS = {
+    76→    76→  /** 0% — wide lakeside stance shot; camera placed on the flank where the
+    77→    77→   *  city skyline + bridge lights fill the background behind the car */
+    78→    78→  hero: { pos: [-6.1, 1.5, 4.3], target: [0, 0.75, 0], mobileF: 1.35 },
+    79→    79→  /** state 1 — dramatic low angle on the front bumper / headlights */
+    80→    80→  front: { pos: [4.4, 0.5, 2.1], target: [2.0, 0.52, 0], mobileF: 2.15, mobileHeadOn: 0.45 },
+    81→    81→  /** state 2 — rear taillights, diffuser and exhaust, same-side sweep */
+    82→    82→  rear: { pos: [-4.3, 0.9, 2.2], target: [-1.9, 0.68, 0], mobileF: 2.0, mobileHeadOn: 0.45 },
+    83→    83→  /** closing wide elevated rear 3/4 for the end card — aim lifted so the
+    84→    84→   *  bridge + skyline stay in frame above the car */
+    85→    85→  outro: { pos: [-6.9, 3.1, 7.2], target: [0, 1.15, 0], mobileF: 1.35 },
+    86→    86→} satisfies Record<string, CamKey>
+    87→    87→
+    88→    88→const FOV_DESKTOP = 45
+    89→    89→const FOV_MOBILE = 60
+    90→    90→
+    91→    91→/* ═════ 3. PRESENTATION GARNISH (drift pose / sway / smoke) ═══════════ */
+    92→    92→
+    93→    93→const BASE_YAW = -0.14 // parked "drift" angle of the car (rad)
+    94→    94→const IDLE_SWAY = true // subtle breathing sway so the car feels alive
+    95→    95→const SMOKE_ENABLED = true // rear-tire smoke puffs
+    96→    96→const SMOKE_PER_SECOND = 105 // thin night haze — heavy smoke floods the close-ups
+    97→    97→const SMOKE_COUNT = 240
+    98→    98→
+    99→    99→/* ══════════════════════════════════════════════════════════════════════
+   100→   100→ * Canvas-generated textures — zero network dependencies
+   101→   101→ * ══════════════════════════════════════════════════════════════════════ */
+   102→   102→
+   103→   103→/** Soft radial sprite used by the smoke particles and light glows */
+   104→   104→function makeSoftCircleTexture(): THREE.CanvasTexture {
+   105→   105→  const canvas = document.createElement('canvas')
+   106→   106→  canvas.width = canvas.height = 128
+   107→   107→  const ctx = canvas.getContext('2d')!
+   108→   108→  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+   109→   109→  g.addColorStop(0, 'rgba(255,255,255,0.7)')
+   110→   110→  g.addColorStop(0.25, 'rgba(255,255,255,0.45)')
+   111→   111→  g.addColorStop(0.6, 'rgba(255,255,255,0.14)')
+   112→   112→  g.addColorStop(1, 'rgba(255,255,255,0)')
+   113→   113→  ctx.fillStyle = g
+   114→   114→  ctx.fillRect(0, 0, 128, 128)
+   115→   115→  const tex = new THREE.CanvasTexture(canvas)
+   116→   116→  tex.colorSpace = THREE.SRGBColorSpace
+   117→   117→  return tex
+   118→   118→}
+   119→   119→
+   120→   120→/** Dark seamless studio vignette used as scene.background — REMOVED:
+   121→   121→ * replaced by the 360° lakeside night panorama (ENV_URL). */
+   122→   122→
+   123→   123→/* ══════════════════════════════════════════════════════════════════════
+   124→   124→ * Car — load the real glTF, normalize + restyle it
+   125→   125→ * ══════════════════════════════════════════════════════════════════════ */
+   126→   126→
+   127→   127→/** glTF material names that carry the body paint / glass (fvrenbld model) */
+   128→   128→const BODY_PAINT = new Set(['Bodyshell1Mtl', 'Bonnet0041Mtl', 'Bonnet1Mtl', 'Boot0041Mtl', 'DoorColor1Mtl'])
+   129→   129→const GLASS = new Set(['Windowrf1Mtl'])
+   130→   130→
+   131→   131→const satinGrayPaint = () =>
+   132→   132→  new THREE.MeshPhysicalMaterial({
+   133→   133→    color: '#868c93',
+   134→   134→    metalness: 0.82,
+   135→   135→    roughness: 0.34,
+   136→   136→    clearcoat: 1,
+   137→   137→    clearcoatRoughness: 0.18,
+   138→   138→    envMapIntensity: 1.25, // picks up the night city glow + lake shimmer
+   139→   139→  })
+   140→   140→
+   141→   141→const darkGlass = () =>
+   142→   142→  new THREE.MeshPhysicalMaterial({
+   143→   143→    color: '#06080b',
+   144→   144→    metalness: 0.55,
+   145→   145→    roughness: 0.1,
+   146→   146→    clearcoat: 1,
+   147→   147→    clearcoatRoughness: 0.06,
+   148→   148→    envMapIntensity: 1.3,
+   149→   149→  })
+   150→   150→
+   151→   151→type CarRig = {
+   152→   152→  car: THREE.Group
+   153→   153→  anchorLeft: THREE.Object3D // rear tire contact patches (smoke emitters)
+   154→   154→  anchorRight: THREE.Object3D
+   155→   155→}
+   156→   156→
+   157→   157→/**
+   158→   158→ * Normalizes ANY car glTF so the camera keyframes above fit without
+   159→   159→ * retuning: centers the footprint, grounds it at y = 0, scales the longest
+   160→   160→ * horizontal span to TARGET_LENGTH, repaints body/glass, hides showroom
+   161→   161→ * plates and enables shadows.
+   162→   162→ */
+   163→   163→function buildCarRig(source: THREE.Object3D): CarRig {
+   164→   164→  const model = source.clone(true)
+   165→   165→
+   166→   166→  const box = new THREE.Box3().setFromObject(model)
+   167→   167→  const size = box.getSize(new THREE.Vector3())
+   168→   168→  const center = box.getCenter(new THREE.Vector3())
+   169→   169→  const scale = TARGET_LENGTH / Math.max(size.x, size.z)
+   170→   170→  model.scale.setScalar(scale)
+   171→   171→  model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale)
+   172→   172→  if (FLIP_MODEL) model.rotation.y = Math.PI
+   173→   173→
+   174→   174→  const gray = satinGrayPaint()
+   175→   175→  const glass = darkGlass()
+   176→   176→  const junk: THREE.Object3D[] = []
+   177→   177→  model.traverse((obj) => {
+   178→   178→    if (!(obj instanceof THREE.Mesh)) return
+   179→   179→    obj.castShadow = true
+   180→   180→    obj.receiveShadow = false
+   181→   181→    const mats = Array.isArray(obj.material) ? [...obj.material] : [obj.material]
+   182→   182→    let replaced = false
+   183→   183→    for (let i = 0; i < mats.length; i++) {
+   184→   184→      const name = mats[i]?.name ?? ''
+   185→   185→      if (BODY_PAINT.has(name)) {
+   186→   186→        mats[i] = gray
+   187→   187→        replaced = true
+   188→   188→      } else if (GLASS.has(name)) {
+   189→   189→        mats[i] = glass
+   190→   190→        replaced = true
+   191→   191→      } else if (mats[i] && (mats[i] as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+   192→   192→        ;(mats[i] as THREE.MeshStandardMaterial).envMapIntensity = 0.7
+   193→   193→      }
+   194→   194→    }
+   195→   195→    if (replaced) obj.material = Array.isArray(obj.material) ? mats : mats[0]
+   196→   196→    // hide giant flat plates (Sketchfab showroom floors)
+   197→   197→    const b = new THREE.Box3().setFromObject(obj)
+   198→   198→    if (b.max.y - b.min.y < 0.12 && b.max.x - b.min.x > 3 && b.max.z - b.min.z > 3) junk.push(obj)
+   199→   199→  })
+   200→   200→  junk.forEach((m) => (m.visible = false))
+   201→   201→
+   202→   202→  const car = new THREE.Group()
+   203→   203→  car.add(model)
+   204→   204→
+   205→   205→  // Smoke anchors at the rear tire contact patches (rear = −X)
+   206→   206→  const anchorLeft = new THREE.Object3D()
+   207→   207→  anchorLeft.position.set(-TARGET_LENGTH * 0.3, 0.16, TARGET_LENGTH * 0.155)
+   208→   208→  const anchorRight = new THREE.Object3D()
+   209→   209→  anchorRight.position.set(-TARGET_LENGTH * 0.3, 0.16, -TARGET_LENGTH * 0.155)
+   210→   210→  car.add(anchorLeft, anchorRight)
+   211→   211→
+   212→   212→  return { car, anchorLeft, anchorRight }
+   213→   213→}
+   214→   214→
+   215→   215→/* ══════════════════════════════════════════════════════════════════════
+   216→   216→ * Tire smoke — pooled CPU particles + point-sprite shader
+   217→   217→ * ══════════════════════════════════════════════════════════════════════ */
+   218→   218→
+   219→   219→const SMOKE_VERTEX = /* glsl */ `
+   220→   220→  attribute float aSize;
+   221→   221→  attribute float aAlpha;
+   222→   222→  uniform float uScale;
+   223→   223→  varying float vAlpha;
+   224→   224→  void main() {
+   225→   225→    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+   226→   226→    float dist = max(0.1, -mv.z);
+   227→   227→    // cap the sprite size and fade puffs that get right next to the
+   228→   228→    // camera (close-up states park the lens near the rear wheels)
+   229→   229→    gl_PointSize = min(aSize * uScale / dist, 190.0);
+   230→   230→    vAlpha = aAlpha * smoothstep(0.7, 2.2, dist);
+   231→   231→    gl_Position = projectionMatrix * mv;
+   232→   232→  }
+   233→   233→`
+   234→   234→
+   235→   235→const SMOKE_FRAGMENT = /* glsl */ `
+   236→   236→  uniform sampler2D uMap;
+   237→   237→  varying float vAlpha;
+   238→   238→  void main() {
+   239→   239→    float a = texture2D(uMap, gl_PointCoord).a * vAlpha * 0.7; // night-subtle
+   240→   240→    if (a < 0.004) discard;
+   241→   241→    gl_FragColor = vec4(0.84, 0.86, 0.9, a);
+   242→   242→  }
+   243→   243→`
+   244→   244→
+   245→   245→type SmokeParticle = {
+   246→   246→  life: number
+   247→   247→  maxLife: number
+   248→   248→  x: number
+   249→   249→  y: number
+   250→   250→  z: number
+   251→   251→  vx: number
+   252→   252→  vy: number
+   253→   253→  vz: number
+   254→   254→  size: number
+   255→   255→}
+   256→   256→
+   257→   257→function createSmokeSystem(softTex: THREE.Texture) {
+   258→   258→  const particles: SmokeParticle[] = Array.from({ length: SMOKE_COUNT }, () => ({
+   259→   259→    life: 0,
+   260→   260→    maxLife: 1,
+   261→   261→    x: 0,
+   262→   262→    y: -50,
+   263→   263→    z: 0,
+   264→   264→    vx: 0,
+   265→   265→    vy: 0,
+   266→   266→    vz: 0,
+   267→   267→    size: 1,
+   268→   268→  }))
+   269→   269→  const position = new Float32Array(SMOKE_COUNT * 3)
+   270→   270→  const aSize = new Float32Array(SMOKE_COUNT)
+   271→   271→  const aAlpha = new Float32Array(SMOKE_COUNT)
+   272→   272→  const geometry = new THREE.BufferGeometry()
+   273→   273→  geometry.setAttribute('position', new THREE.BufferAttribute(position, 3))
+   274→   274→  geometry.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1))
+   275→   275→  geometry.setAttribute('aAlpha', new THREE.BufferAttribute(aAlpha, 1))
+   276→   276→
+   277→   277→  const material = new THREE.ShaderMaterial({
+   278→   278→    uniforms: { uScale: { value: 600 }, uMap: { value: softTex } },
+   279→   279→    vertexShader: SMOKE_VERTEX,
+   280→   280→    fragmentShader: SMOKE_FRAGMENT,
+   281→   281→    transparent: true,
+   282→   282→    depthWrite: false,
+   283→   283→  })
+   284→   284→
+   285→   285→  const points = new THREE.Points(geometry, material)
+   286→   286→  points.frustumCulled = false
+   287→   287→  points.renderOrder = 5
+   288→   288→
+   289→   289→  const state = { cursor: 0, spawnAcc: 0 }
+   290→   290→
+   291→   291→  /** dt seconds · emitters are the two rear-tire anchor world positions */
+   292→   292→  function update(dt: number, left: THREE.Vector3, right: THREE.Vector3, spawn: boolean) {
+   293→   293→    state.spawnAcc += dt * (spawn ? SMOKE_PER_SECOND : 0)
+   294→   294→    while (state.spawnAcc >= 1) {
+   295→   295→      state.spawnAcc -= 1
+   296→   296→      state.cursor = (state.cursor + 1) % SMOKE_COUNT
+   297→   297→      const p = particles[state.cursor]
+   298→   298→      const src = state.cursor % 2 === 0 ? left : right
+   299→   299→      p.life = 0.0001
+   300→   300→      p.maxLife = 1.8 + Math.random() * 1.0
+   301→   301→      p.x = src.x + (Math.random() - 0.5) * 0.24
+   302→   302→      p.y = 0.12 + Math.random() * 0.08
+   303→   303→      p.z = src.z + (Math.random() - 0.5) * 0.24
+   304→   304→      // drift backwards (−X) and outward away from the centerline
+   305→   305→      p.vx = -(0.5 + Math.random() * 0.7)
+   306→   306→      p.vz = Math.sign(src.z || 1) * (0.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.5
+   307→   307→      p.vy = 0.18 + Math.random() * 0.3
+   308→   308→      p.size = 0.35 + Math.random() * 0.3
+   309→   309→    }
+   310→   310→
+   311→   311→    for (let i = 0; i < SMOKE_COUNT; i++) {
+   312→   312→      const p = particles[i]
+   313→   313→      if (p.life > 0) {
+   314→   314→        p.life += dt
+   315→   315→        if (p.life >= p.maxLife) {
+   316→   316→          p.life = 0
+   317→   317→        } else {
+   318→   318→          const drag = Math.exp(-1.1 * dt)
+   319→   319→          p.vx *= drag
+   320→   320→          p.vz *= drag
+   321→   321→          p.vy = p.vy * Math.exp(-0.7 * dt) + 0.14 * dt
+   322→   322→          p.x += p.vx * dt
+   323→   323→          p.y += p.vy * dt
+   324→   324→          p.z += p.vz * dt
+   325→   325→        }
+   326→   326→      }
+   327→   327→      const t = p.life > 0 ? p.life / p.maxLife : 0
+   328→   328→      position[i * 3] = p.x
+   329→   329→      position[i * 3 + 1] = p.life > 0 ? p.y : -50
+   330→   330→      position[i * 3 + 2] = p.z
+   331→   331→      aSize[i] = p.size + t * 2.0
+   332→   332→      aAlpha[i] = p.life > 0 ? Math.min(t * 6, 1) * Math.pow(1 - t, 1.1) * 0.4 : 0
+   333→   333→    }
+   334→   334→    geometry.attributes.position.needsUpdate = true
+   335→   335→    geometry.attributes.aSize.needsUpdate = true
+   336→   336→    geometry.attributes.aAlpha.needsUpdate = true
+   337→   337→  }
+   338→   338→
+   339→   339→  function dispose() {
+   340→   340→    geometry.dispose()
+   341→   341→    material.dispose()
+   342→   342→  }
+   343→   343→
+   344→   344→  return { points, material, update, dispose }
+   345→   345→}
+   346→   346→
+   347→   347→/* ══════════════════════════════════════════════════════════════════════
+   348→   348→ * Camera-rig math
+   349→   349→ * ══════════════════════════════════════════════════════════════════════ */
+   350→   350→
+   351→   351→type FlatKey = { px: number; py: number; pz: number; tx: number; ty: number; tz: number }
+   352→   352→
+   353→   353→/** Flatten a keyframe; on portrait screens the pos→target offset is
+   354→   354→ *  scaled by mobileF so the car never clips out of the narrow viewport. */
+   355→   355→function flattenKey(k: CamKey, mobile: boolean): FlatKey {
+   356→   356→  let [px, py, pz] = k.pos
+   357→   357→  const [tx, ty, tz] = k.target
+   358→   358→  if (mobile) {
+   359→   359→    px = tx + (px - tx) * k.mobileF
+   360→   360→    py = ty + (py - ty) * k.mobileF
+   361→   361→    pz = tz + (pz - tz) * k.mobileF * (k.mobileHeadOn ?? 1)
+   362→   362→  }
+   363→   363→  return { px, py, pz, tx, ty, tz }
+   364→   364→}
+   365→   365→
+   366→   366→/* ══════════════════════════════════════════════════════════════════════
+   367→   367→ * Overlay UI data (copied verbatim from the approved hero design)
+   368→   368→ * ══════════════════════════════════════════════════════════════════════ */
+   369→   369→
+   370→   370→const NAV_LINKS = ['Overview', 'Performance', 'Design', 'Specs'] as const
+   371→   371→
+   372→   372→type StarDot = {
+   373→   373→  top: string
+   374→   374→  side: 'left' | 'right'
+   375→   375→  offset: string
+   376→   376→  size: number
+   377→   377→  opacity: number
+   378→   378→  glow?: string
+   379→   379→}
+   380→   380→
+   381→   381→const STAR_DOTS: StarDot[] = [
+   382→   382→  { top: '14%', side: 'left', offset: '14%', size: 3, opacity: 0.5, glow: '0 0 6px 1px oklch(0.85 0.08 85 / 0.5)' },
+   383→   383→  { top: '28%', side: 'right', offset: '18%', size: 2, opacity: 0.4, glow: '0 0 5px 1px oklch(0.85 0.08 85 / 0.4)' },
+   384→   384→  { top: '49%', side: 'left', offset: '10%', size: 2, opacity: 0.35 },
+   385→   385→  { top: '60%', side: 'right', offset: '12%', size: 3, opacity: 0.3, glow: '0 0 6px 1px oklch(0.85 0.08 85 / 0.35)' },
+   386→   386→  { top: '21%', side: 'left', offset: '33%', size: 2, opacity: 0.3 },
+   387→   387→  { top: '40%', side: 'right', offset: '33%', size: 2, opacity: 0.45 },
+   388→   388→]
+   389→   389→
+   390→   390→function starDotStyle(dot: StarDot): CSSProperties {
+   391→   391→  return {
+   392→   392→    top: dot.top,
+   393→   393→    width: dot.size,
+   394→   394→    height: dot.size,
+   395→   395→    opacity: dot.opacity,
+   396→   396→    boxShadow: dot.glow ?? 'none',
+   397→   397→    ...(dot.side === 'left' ? { left: dot.offset } : { right: dot.offset }),
+   398→   398→  }
+   399→   399→}
+   400→   400→
+   401→   401→/* ══════════════════════════════════════════════════════════════════════
+   402→   402→ * Component
+   403→   403→ * ══════════════════════════════════════════════════════════════════════ */
+   404→   404→
+   405→   405→export default function ScrollExperience() {
+   406→   406→  const canvasRef = useRef<HTMLCanvasElement>(null)
+   407→   407→  const trackRef = useRef<HTMLDivElement>(null)
+   408→   408→  const heroLayerRef = useRef<HTMLDivElement>(null)
+   409→   409→  const capFrontRef = useRef<HTMLDivElement>(null)
+   410→   410→  const capRearRef = useRef<HTMLDivElement>(null)
+   411→   411→  const endCardRef = useRef<HTMLDivElement>(null)
+   412→   412→
+   413→   413→  useEffect(() => {
+   414→   414→    const canvas = canvasRef.current
+   415→   415→    const track = trackRef.current
+   416→   416→    const heroLayer = heroLayerRef.current
+   417→   417→    const capFront = capFrontRef.current
+   418→   418→    const capRear = capRearRef.current
+   419→   419→    const endCard = endCardRef.current
+   420→   420→    if (!canvas || !track || !heroLayer || !capFront || !capRear || !endCard) return
+   421→   421→
+   422→   422→    let disposed = false
+   423→   423→    gsap.registerPlugin(ScrollTrigger)
+   424→   424→
+   425→   425→    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+   426→   426→
+   427→   427→    /* ── Renderer ──────────────────────────────────────────────────── */
+   428→   428→    const renderer = new THREE.WebGLRenderer({
+   429→   429→      canvas,
+   430→   430→      antialias: true,
+   431→   431→      alpha: false,
+   432→   432→      powerPreference: 'high-performance',
+   433→   433→    })
+   434→   434→    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // perf cap
+   435→   435→    renderer.setSize(window.innerWidth, window.innerHeight, false)
+   436→   436→    renderer.shadowMap.enabled = true
+   437→   437→    // three r186 removed PCFSoftShadowMap — PCFShadowMap is the supported
+   438→   438→    // filtered shadow path (renders soft contacts with a 2K map)
+   439→   439→    renderer.shadowMap.type = THREE.PCFShadowMap
+   440→   440→    renderer.toneMapping = THREE.ACESFilmicToneMapping
+   441→   441→    renderer.toneMappingExposure = 1.15 // lifts the night IBL without clipping the city lights
+   442→   442→    renderer.outputColorSpace = THREE.SRGBColorSpace
+   443→   443→
+   444→   444→    /* ── Scene: lakeside night city — 360° equirect panorama ─────
+   445→   445→     * The SAME texture is the visible backdrop and the IBL source
+   446→   446→     * (PMREM pre-filter), so the metallic paint reflects exactly the
+   447→   447→     * skyline / lake / bridges you see behind the car. */
+   448→   448→    const scene = new THREE.Scene()
+   449→   449→    renderer.setClearColor(0x04050a, 1) // fallback until the panorama streams in
+   450→   450→
+   451→   451→    scene.backgroundRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0)
+   452→   452→    scene.environmentRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0) // keep reflections aligned
+   453→   453→
+   454→   454→    const pmrem = new THREE.PMREMGenerator(renderer)
+   455→   455→    let lakeTex: THREE.Texture | null = null
+   456→   456→    let lakeEnvRT: THREE.WebGLRenderTarget | null = null
+   457→   457→
+   458→   458→    new THREE.TextureLoader().load(
+   459→   459→      ENV_URL,
+   460→   460→      (tex) => {
+   461→   461→        if (disposed) {
+   462→   462→          tex.dispose()
+   463→   463→          return
+   464→   464→        }
+   465→   465→        tex.mapping = THREE.EquirectangularReflectionMapping // 2:1 photo → skybox + IBL
+   466→   466→        tex.colorSpace = THREE.SRGBColorSpace
+   467→   467→        tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
+   468→   468→        lakeTex = tex
+   469→   469→        scene.background = tex
+   470→   470→        scene.backgroundIntensity = 1.0
+   471→   471→        lakeEnvRT = pmrem.fromEquirectangular(tex) // roughness-aware reflections
+   472→   472→        scene.environment = lakeEnvRT.texture
+   473→   473→      },
+   474→   474→      undefined,
+   475→   475→      (error) => console.warn('[scroll-experience] panorama failed to load:', error),
+   476→   476→    )
+   477→   477→
+   478→   478→    /* ── Camera ────────────────────────────────────────────────────── */
+   479→   479→    const camera = new THREE.PerspectiveCamera(FOV_DESKTOP, window.innerWidth / window.innerHeight, 0.1, 160)
+   480→   480→
+   481→   481→    /* ── Lights ────────────────────────────────────────────────────── */
+   482→   482→    const key = new THREE.SpotLight(0xdfe9ff, 340) // cool night floodlight — casts the contact shadows
+   483→   483→    key.position.set(3, 14, 4) // steep angle → tight shadow that hugs the tires
+   484→   484→    key.angle = 0.55
+   485→   485→    key.penumbra = 0.55
+   486→   486→    key.decay = 2
+   487→   487→    key.castShadow = true
+   488→   488→    key.shadow.mapSize.set(2048, 2048)
+   489→   489→    key.shadow.bias = -0.0002
+   490→   490→    key.shadow.normalBias = 0.02
+   491→   491→    key.shadow.camera.near = 3
+   492→   492→    key.shadow.camera.far = 30
+   493→   493→    key.target.position.set(0, 0.5, 0)
+   494→   494→    scene.add(key, key.target)
+   495→   495→
+   496→   496→    const rim = new THREE.DirectionalLight(0x9fc0ee, 2.4) // moonlit edge light
+   497→   497→    rim.position.set(-8, 5, -6)
+   498→   498→    scene.add(rim)
+   499→   499→
+   500→   500→    scene.add(new THREE.HemisphereLight(0x27364e, 0x0a0c10, 0.5)) // night sky / asphalt bounce
+   501→   501→
+   502→   502→    /* ── Floor (invisible ShadowMaterial shadow-catcher) ─────────────────────────────────────── */
+   503→   503→    const floor = new THREE.Mesh(
+   504→   504→      new THREE.CircleGeometry(90, 72),
+   505→   505→      // Transparent shadow-catcher only — the parking-lot foreground is
+   506→   506→      // PART of the panorama. Opacity 0.55, tuned up for the dark scene.
+   507→   507→      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.55 }),
+   508→   508→    )
+   509→   509→    floor.rotation.x = -Math.PI / 2
+   510→   510→    floor.receiveShadow = true
+   511→   511→    scene.add(floor)
+   512→   512→
+   513→   513→    /* ── Car root + light glows (model streams in asynchronously) ──── */
+   514→   514→    const carGroup = new THREE.Group()
+   515→   515→    carGroup.rotation.y = BASE_YAW
+   516→   516→    scene.add(carGroup)
+   517→   517→
+   518→   518→    const softTex = makeSoftCircleTexture()
+   519→   519→    const addGlow = (x: number, y: number, z: number, color: number, opacity: number, size: number) => {
+   520→   520→      const sprite = new THREE.Sprite(
+   521→   521→        new THREE.SpriteMaterial({
+   522→   522→          map: softTex,
+   523→   523→          color,
+   524→   524→          transparent: true,
+   525→   525→          opacity,
+   526→   526→          blending: THREE.AdditiveBlending,
+   527→   527→          depthWrite: false,
+   528→   528→        }),
+   529→   529→      )
+   530→   530→      sprite.position.set(x, y, z)
+   531→   531→      sprite.scale.setScalar(size)
+   532→   532→      carGroup.add(sprite)
+   533→   533→    }
+   534→   534→    addGlow(2.08, 0.58, 0.55, 0xcfe0ff, 0.5, 0.7) // headlights — night glare
+   535→   535→    addGlow(2.08, 0.58, -0.55, 0xcfe0ff, 0.5, 0.7)
+   536→   536→    addGlow(-2.12, 0.62, 0.55, 0xff3b3b, 0.38, 0.62) // taillights
+   537→   537→    addGlow(-2.12, 0.62, -0.55, 0xff3b3b, 0.38, 0.62)
+   538→   538→
+   539→   539→    let carRig: CarRig | null = null
+   540→   540→    new GLTFLoader().load(
+   541→   541→      MODEL_URL,
+   542→   542→      (gltf) => {
+   543→   543→        if (disposed) return
+   544→   544→        carRig = buildCarRig(gltf.scene)
+   545→   545→        // gentle settle-in entrance once the model has parsed
+   546→   546→        carRig.car.position.y = -0.12
+   547→   547→        carGroup.add(carRig.car)
+   548→   548→        gsap.to(carRig.car.position, { y: 0, duration: 0.9, ease: 'power2.out' })
+   549→   549→      },
+   550→   550→      undefined,
+   551→   551→      (error) => {
+   552→   552→        console.warn('[scroll-experience] car model failed to load:', error)
+   553→   553→      },
+   554→   554→    )
+   555→   555→
+   556→   556→    /* ── Smoke ─────────────────────────────────────────────────────── */
+   557→   557→    const smoke = createSmokeSystem(softTex)
+   558→   558→    scene.add(smoke.points)
+   559→   559→
+   560→   560→    const drawSize = new THREE.Vector2()
+   561→   561→    const updatePointScale = () => {
+   562→   562→      renderer.getDrawingBufferSize(drawSize)
+   563→   563→      const fovRad = (camera.fov * Math.PI) / 180
+   564→   564→      const s = (drawSize.y * 0.5) / Math.tan(fovRad / 2)
+   565→   565→      smoke.material.uniforms.uScale.value = Number.isFinite(s) ? s : 800
+   566→   566→    }
+   567→   567→    updatePointScale()
+   568→   568→
+   569→   569→    /* ── Camera rig state — animated by GSAP, applied every frame ──── */
+   570→   570→    const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
+   571→   571→    const applyCamera = () => {
+   572→   572→      camera.position.set(cam.px, cam.py, cam.pz)
+   573→   573→      camera.lookAt(cam.tx, cam.ty, cam.tz) // target tracked every frame
+   574→   574→    }
+   575→   575→
+   576→   576→    /* ── Per-frame world updates (sway, smoke) ─────────────────────── */
+   577→   577→    const anchorL = new THREE.Vector3()
+   578→   578→    const anchorR = new THREE.Vector3()
+   579→   579→    const updateWorld = (t: number, dt: number) => {
+   580→   580→      const sway = prefersReduced || !IDLE_SWAY ? 0 : 1
+   581→   581→      carGroup.rotation.y = BASE_YAW + sway * Math.sin(t * 0.42) * 0.05
+   582→   582→      carGroup.rotation.x = sway * (Math.sin(t * 2.9) * 0.008 - 0.006)
+   583→   583→      carGroup.rotation.z = sway * Math.sin(t * 2.1) * 0.009
+   584→   584→      carGroup.position.y = sway * Math.abs(Math.sin(t * 4.7)) * 0.014
+   585→   585→      if (carRig && SMOKE_ENABLED && !prefersReduced) {
+   586→   586→        smoke.update(dt, carRig.anchorLeft.getWorldPosition(anchorL), carRig.anchorRight.getWorldPosition(anchorR), true)
+   587→   587→      }
+   588→   588→    }
+   589→   589→
+   590→   590→    /* ── GSAP ScrollTrigger choreography ─────────────────────────────
+   591→   591→     * One master timeline, scrubbed by scroll. Positions are expressed in
+   592→   592→     * normalized progress units (the whole timeline lasts 1.0).        */
+   593→   593→    const buildTimeline = (mobile: boolean) => {
+   594→   594→      const K = {
+   595→   595→        hero: flattenKey(KEYS.hero, mobile),
+   596→   596→        front: flattenKey(KEYS.front, mobile),
+   597→   597→        rear: flattenKey(KEYS.rear, mobile),
+   598→   598→        outro: flattenKey(KEYS.outro, mobile),
+   599→   599→      }
+   600→   600→      // hard-reset the rig to the hero pose so scrubbing always starts
+   601→   601→      // from a known state (and fully rewinds when scrolling back up)
+   602→   602→      Object.assign(cam, K.hero)
+   603→   603→      applyCamera()
+   604→   604→
+   605→   605→      const tl = gsap.timeline({
+   606→   606→        defaults: { ease: 'power2.inOut' },
+   607→   607→        scrollTrigger: {
+   608→   608→          trigger: track,
+   609→   609→          start: 'top top',
+   610→   610→          end: 'bottom bottom',
+   611→   611→          scrub: prefersReduced ? true : 1.2, // momentum catch-up
+   612→   612→        },
+   613→   613→      })
+   614→   614→
+   615→   615→      /* Act I — HERO → FRONT (0 → 0.30) */
+   616→   616→      tl.to(cam, { ...K.front, duration: 0.3 }, 0)
+   617→   617→      tl.to(heroLayer, { autoAlpha: 0, y: -42, duration: 0.11, ease: 'power1.in' }, 0.02)
+   618→   618→      tl.fromTo(capFront, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.17)
+   619→   619→      tl.to(capFront, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.36)
+   620→   620→
+   621→   621→      /* dwell on the front bumper (0.30 → 0.42) — no camera tweens */
+   622→   622→
+   623→   623→      /* Act II — FRONT → REAR (0.42 → 0.72) */
+   624→   624→      tl.to(cam, { ...K.rear, duration: 0.3 }, 0.42)
+   625→   625→      tl.fromTo(capRear, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.58)
+   626→   626→      tl.to(capRear, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.78)
+   627→   627→
+   628→   628→      /* dwell on the rear (0.72 → 0.84) */
+   629→   629→
+   630→   630→      /* Act III — REAR → OUTRO (0.84 → 1.00) + closing card */
+   631→   631→      tl.to(cam, { ...K.outro, duration: 0.16 }, 0.84)
+   632→   632→      tl.fromTo(endCard, { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 0.1, ease: 'power2.out' }, 0.9)
+   633→   633→
+   634→   634→      return tl
+   635→   635→    }
+   636→   636→
+   637→   637→    /* Breakpoint-aware setup: FOV + keyframe distances change between
+   638→   638→     * desktop (16:9) and portrait mobile. gsap.matchMedia rebuilds the
+   639→   639→     * timeline automatically when crossing 768px and cleans up on
+   640→   640→     * unmount. Resizes within a breakpoint only need ScrollTrigger
+   641→   641→     *.refresh() (handled in onResize below). */
+   642→   642→    const mm = gsap.matchMedia()
+   643→   643→    mm.add(
+   644→   644→      {
+   645→   645→        isDesktop: '(min-width: 768px)',
+   646→   646→        isMobile: '(max-width: 767px)',
+   647→   647→      },
+   648→   648→      (ctx) => {
+   649→   649→        const mobile = ctx.conditions?.isMobile === true
+   650→   650→        camera.fov = mobile ? FOV_MOBILE : FOV_DESKTOP
+   651→   651→        camera.updateProjectionMatrix()
+   652→   652→        updatePointScale()
+   653→   653→        buildTimeline(mobile)
+   654→   654→      },
+   655→   655→    )
+   656→   656→
+   657→   657→    /* ── Lenis momentum scrolling + a single GSAP ticker for everything ── */
+   658→   658→    let lenis: Lenis | null = null
+   659→   659→    if (!prefersReduced) {
+   660→   660→      lenis = new Lenis({ duration: 1.15, smoothWheel: true })
+   661→   661→      lenis.on('scroll', ScrollTrigger.update)
+   662→   662→    }
+   663→   663→
+   664→   664→    const tick = (time: number, deltaMS: number) => {
+   665→   665→      lenis?.raf(time * 1000)
+   666→   666→      updateWorld(time, Math.min(deltaMS / 1000, 0.05))
+   667→   667→      applyCamera()
+   668→   668→      renderer.render(scene, camera)
+   669→   669→    }
+   670→   670→    gsap.ticker.add(tick)
+   671→   671→    gsap.ticker.lagSmoothing(0)
+   672→   672→
+   673→   673→    /* ── Resize: reproject the camera, resize the renderer, refresh
+   674→   674→     *    ScrollTrigger (debounced so mobile address-bar resize storms
+   675→   675→     *    don't thrash the layout measurements) ──────────────────────── */
+   676→   676→    let refreshTimer = 0
+   677→   677→    const onResize = () => {
+   678→   678→      const w = window.innerWidth
+   679→   679→      const h = window.innerHeight
+   680→   680→      camera.aspect = w / h
+   681→   681→      camera.updateProjectionMatrix()
+   682→   682→      renderer.setSize(w, h, false)
+   683→   683→      updatePointScale()
+   684→   684→      window.clearTimeout(refreshTimer)
+   685→   685→      refreshTimer = window.setTimeout(() => ScrollTrigger.refresh(), 150)
+   686→   686→    }
+   687→   687→    window.addEventListener('resize', onResize)
+   688→   688→
+   689→   689→    /* ── Teardown — no memory leaks ────────────────────────────────── */
+   690→   690→    return () => {
+   691→   691→      disposed = true
+   692→   692→      window.removeEventListener('resize', onResize)
+   693→   693→      window.clearTimeout(refreshTimer)
+   694→   694→      mm.revert() // kills the ScrollTriggers/tweens created per breakpoint
+   695→   695→      ScrollTrigger.getAll().forEach((st) => st.kill()) // safety net
+   696→   696→      gsap.ticker.remove(tick)
+   697→   697→      lenis?.destroy()
+   698→   698→      smoke.dispose()
+   699→   699→      scene.traverse((obj) => {
+   700→   700→        const o = obj as THREE.Mesh
+   701→   701→        if (o.geometry) o.geometry.dispose()
+   702→   702→        const m = o.material as THREE.Material | THREE.Material[] | undefined
+   703→   703→        const disposeMat = (mat: THREE.Material) => {
+   704→   704→          const withMap = mat as THREE.Material & { map?: THREE.Texture | null }
+   705→   705→          withMap.map?.dispose()
+   706→   706→          mat.dispose()
+   707→   707→        }
+   708→   708→        if (Array.isArray(m)) m.forEach(disposeMat)
+   709→   709→        else if (m) disposeMat(m)
+   710→   710→      })
+   711→   711→      softTex.dispose()
+   712→   712→      lakeTex?.dispose()
+   713→   713→      lakeEnvRT?.dispose()
+   714→   714→      scene.background = null
+   715→   715→      scene.environment = null
+   716→   716→      pmrem.dispose()
+   717→   717→      renderer.forceContextLoss()
+   718→   718→      renderer.dispose()
+   719→   719→    }
+   720→   720→  }, [])
+   721→   721→
+   722→   722→  /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
+   723→   723→
+   724→   724→  return (
+   725→   725→    <main className="relative w-full bg-[#050608] text-[#f2efe7]">
+   726→   726→      {/*
+   727→   727→        Invisible scroll track — its height (440vh) is the scroll distance
+   728→   728→        ScrollTrigger scrubs the camera timeline through. Fully reversible.
+   729→   729→      */}
+   730→   730→      <div ref={trackRef} aria-hidden="true" className="h-[440vh]" />
+   731→   731→
+   732→   732→      {/* Fixed 3D stage */}
+   733→   733→      <canvas
+   734→   734→        ref={canvasRef}
+   735→   735→        role="img"
+   736→   736→        aria-label="3D BMW M5 CS lakeside night inspection — scroll to explore the car"
+   737→   737→        className="fixed inset-0 z-0 block h-full w-full"
+   738→   738→      />
+   739→   739→
+   740→   740→      {/* Fixed UI overlay */}
+   741→   741→      <div className="pointer-events-none fixed inset-0 z-10">
+   742→   742→        {/* ── Navbar (persists through the whole sequence) ── */}
+   743→   743→        <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-4 px-[clamp(20px,5.5vw,80px)] py-[clamp(16px,3vw,32px)]">
+   744→   744→          <a
+   745→   745→            href="#"
+   746→   746→            aria-label="BMW M5 CS — home"
+   747→   747→            className="flex items-center gap-2.5 text-[#f5f2ea] hover:text-[#f5f2ea]"
+   748→   748→          >
+   749→   749→            {/* Official BMW roundel (user-provided asset) */}
+   750→   750→            <Image
+   751→   751→              src="/bmw-roundel.png"
+   752→   752→              alt=""
+   753→   753→              width={36}
+   754→   754→              height={36}
+   755→   755→              priority
+   756→   756→              draggable={false}
+   757→   757→              className="block h-9 w-9"
+   758→   758→            />
+   759→   759→            <svg
+   760→   760→              width="24"
+   761→   761→              height="16"
+   762→   762→              viewBox="0 0 32 21"
+   763→   763→              fill="none"
+   764→   764→              xmlns="http://www.w3.org/2000/svg"
+   765→   765→              aria-hidden="true"
+   766→   766→              focusable="false"
+   767→   767→            >
+   768→   768→              {/* M tricolor stripes */}
+   769→   769→              <path d="M5.5 0h5.5L5.5 21H0Z" fill="#009ADA" />
+   770→   770→              <path d="M16 0h5.5L16 21h-5.5Z" fill="#2B3990" />
+   771→   771→              <path d="M26.5 0H32L26.5 21H21Z" fill="#E4002B" />
+   772→   772→            </svg>
+   773→   773→            {/* M5 CS wordmark */}
+   774→   774→            <span className="text-[21px] font-extrabold italic leading-none tracking-[0.01em]">
+   775→   775→              M5 CS
+   776→   776→            </span>
+   777→   777→          </a>
+   778→   778→
+   779→   779→          <nav aria-label="Primary" className="flex flex-wrap items-center gap-[clamp(16px,2.8vw,40px)]">
+   780→   780→            {NAV_LINKS.map((label) => (
+   781→   781→              <a
+   782→   782→                key={label}
+   783→   783→                href="#"
+   784→   784→                className="text-[13px] font-normal tracking-[0.02em] text-white transition-colors hover:text-white/80"
+   785→   785→              >
+   786→   786→                {label}
+   787→   787→              </a>
+   788→   788→            ))}
+   789→   789→            <a href="#" className="signin-btn">
+   790→   790→              Book a Drive
+   791→   791→            </a>
+   792→   792→          </nav>
+   793→   793→        </header>
+   794→   794→
+   795→   795→        {/* ── Hero layer — fades out as the camera leaves the hero state ── */}
+   796→   796→        <div ref={heroLayerRef} className="absolute inset-0 flex flex-col">
+   797→   797→          {STAR_DOTS.map((dot) => (
+   798→   798→            <span
+   799→   799→              key={`${dot.top}-${dot.side}-${dot.offset}`}
+   800→   800→              aria-hidden="true"
+   801→   801→              className="pointer-events-none absolute rounded-full bg-[#e8ddc4]"
+   802→   802→              style={starDotStyle(dot)}
+   803→   803→            />
+   804→   804→          ))}
+   805→   805→
+   806→   806→          <section className="mt-auto flex flex-col items-center px-[clamp(20px,8vw,120px)] pb-[clamp(56px,9vh,90px)] text-center">
+   807→   807→            <div aria-hidden="true" className="mb-[clamp(20px,3vh,32px)] flex items-center gap-4">
+   808→   808→              <span className="h-px w-12 bg-[linear-gradient(90deg,transparent,#FFB733)]" />
+   809→   809→              <span className="text-[18px] leading-none text-[#FFB733]">✦</span>
+   810→   810→              <span className="h-px w-12 bg-[linear-gradient(90deg,#FFB733,transparent)]" />
+   811→   811→            </div>
+   812→   812→
+   813→   813→            <h1 className="m-0 mb-5 whitespace-nowrap text-[clamp(22px,5.5vw,44px)] font-semibold leading-[1.12] tracking-[-0.02em] text-[#f7f4ec]">
+   814→   814→              Engineered for <span className="text-white">the Apex</span>
+   815→   815→            </h1>
+   816→   816→
+   817→   817→            <p className="m-0 mb-9 text-[15px] font-normal leading-[1.7] text-white/75">
+   818→   818→              The most powerful BMW 5 Series of all time — a 627 hp twin-turbo V8{' '}
+   819→   819→              <br className="hidden sm:inline" aria-hidden="true" />
+   820→   820→              stripped of 70 kg and sharpened on the Nürburgring.
+   821→   821→            </p>
+   822→   822→
+   823→   823→            <a href="#" className="cta-btn pointer-events-auto">
+   824→   824→              Explore the M5 CS
+   825→   825→              <svg
+   826→   826→                width="18"
+   827→   827→                height="18"
+   828→   828→                viewBox="0 0 24 24"
+   829→   829→                fill="none"
+   830→   830→                stroke="currentColor"
+   831→   831→                strokeWidth="2"
+   832→   832→                strokeLinecap="round"
+   833→   833→                strokeLinejoin="round"
+   834→   834→                aria-hidden="true"
+   835→   835→                focusable="false"
+   836→   836→              >
+   837→   837→                <path d="M4 12h15" />
+   838→   838→                <path d="M13.5 5.5 20 12l-6.5 6.5" />
+   839→   839→              </svg>
+   840→   840→            </a>
+   841→   841→          </section>
+   842→   842→        </div>
+   843→   843→
+   844→   844→        {/* ── Stage caption: FRONT (right side on desktop) ── */}
+   845→   845→        <div
+   846→   846→          ref={capFrontRef}
+   847→   847→          style={{ opacity: 0 }}
+   848→   848→          className="absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[38%] sm:text-right"
+   849→   849→        >
+   850→   850→          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">01 — Front Fascia</p>
+   851→   851→          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
+   852→   852→            Laserlight &amp; Kidney Grille
+   853→   853→          </h2>
+   854→   854→          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
+   855→   855→            Illuminated M Laserlights and widened kidneys against the harbour glow.
+   856→   856→          </p>
+   857→   857→        </div>
+   858→   858→
+   859→   859→        {/* ── Stage caption: REAR (left side on desktop) ── */}
+   860→   860→        <div
+   861→   861→          ref={capRearRef}
+   862→   862→          style={{ opacity: 0 }}
+   863→   863→          className="absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[38%]"
+   864→   864→        >
+   865→   865→          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">02 — Rear Profile</p>
+   866→   866→          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
+   867→   867→            Diffuser &amp; Quad Exhaust
+   868→   868→          </h2>
+   869→   869→          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
+   870→   870→            Blacked-out taillights and quad pipes against the glowing bridge line.
+   871→   871→          </p>
+   872→   872→        </div>
+   873→   873→
+   874→   874→        {/* ── Closing card ── */}
+   875→   875→        <div
+   876→   876→          ref={endCardRef}
+   877→   877→          style={{ opacity: 0 }}
+   878→   878→          className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center"
+   879→   879→        >
+   880→   880→          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.4em] text-[#e8ddc4]/80">BMW M5 CS</p>
+   881→   881→          <h2 className="m-0 mt-4 text-[clamp(24px,4.5vw,40px)] font-semibold tracking-[-0.02em] text-[#f7f4ec]">
+   882→   882→            The most powerful M5 ever built.
+   883→   883→          </h2>
+   884→   884→          <a href="#" className="cta-btn pointer-events-auto mt-8">
+   885→   885→            Reserve Yours
+   886→   886→            <svg
+   887→   887→              width="18"
+   888→   888→              height="18"
+   889→   889→              viewBox="0 0 24 24"
+   890→   890→              fill="none"
+   891→   891→              stroke="currentColor"
+   892→   892→              strokeWidth="2"
+   893→   893→              strokeLinecap="round"
+   894→   894→              strokeLinejoin="round"
+   895→   895→              aria-hidden="true"
+   896→   896→              focusable="false"
+   897→   897→            >
+   898→   898→              <path d="M4 12h15" />
+   899→   899→              <path d="M13.5 5.5 20 12l-6.5 6.5" />
+   900→   900→            </svg>
+   901→   901→          </a>
+   902→   902→        </div>
+   903→   903→
+   904→   904→        {/* CC-BY-4.0 license attribution (required by the model author) */}
+   905→   905→        <p className="absolute bottom-2 left-4 m-0 text-[10px] leading-none text-white/25">
+   906→   906→          BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0
+   907→   907→        </p>
+   908→   908→      </div>
+   909→   909→    </main>
+   910→   910→  )
+   911→   911→}
+   912→   912→
