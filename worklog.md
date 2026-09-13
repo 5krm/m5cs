@@ -250,3 +250,20 @@ Stage Summary:
 - Drift theme fully removed (smoke, glows, sway); the M5 CS is a parked car in every frame, anchored by a real cast shadow + fake-AO contact ellipse.
 - All previously floating framings verified grounded on desktop + mobile.
 - Production still awaiting Vercel re-auth; code ready at commit.
+
+---
+Task ID: 11
+Agent: Z.ai Code (main agent)
+Task: User request — "i want the first part to show the car big and the city 'mid of background'" — reframe the hero shot so the car reads bigger and the city skyline sits in the MIDDLE of the background (it hugged the top edge before).
+
+Work Log:
+- Diagnosis from a fresh 1440×900 screenshot: the Task 9 hero (pos [-4.75,2.4,3.35], target y 0.48, fov 56) tilted the lens down ~18°, which pinned the photo horizon at ~14% of frame height — the bridge/skyline were squeezed into the top band while water filled the middle; car spanned only ~39% of frame width.
+- Reframed the hero key (single edit, all other keys untouched): pos [-3.76,1.95,2.65] (same azimuth → same bridge+skyline district; horizontal distance 5.81→4.6u = car ~25% bigger), height 2.4→1.95, target y 0.48→1.42 (near-level aim, pitch ≈6.6°), fov 56→60 (keeps the approved 0.4× wide-lens look; horizon now lands at ~42–44% = city mid-background).
+- Grounding preserved by geometry, not pitch: wheels project atan(1.95/4.6) ≈ 23° below the photo horizon (open lot asphalt ≈3.6m into the photo); first iteration at height 1.75 put the nose wheels near the bright walkway band, so height was raised to 1.95 — verified the nose + contact shadow sit on dark asphalt.
+- Verified via agent-browser (desktop 1440×900, wheel-driven scrolling — NOTE: programmatic window.scrollTo fights Lenis's internal target and stalls mid-tween; always use mouse wheel + wait): hero (big grounded car, bridge+skyline mid-frame), Act I tweens 0.06/0.12/0.23/0.28, head-on waypoint 0.47, cranes flank 0.59, rear dwell 0.78, outro 1.0 (user-approved framing untouched), full reverse rewind restoring the hero exactly. Mobile 390×844: hero (car full-width, city clear), front 0.38, rear 0.80 — all grounded, no cropping.
+- lint 0/0. Committed 4a3df46. Vercel deploy still blocked (sandbox credentials lost since Task 9 — needs `vercel login` or a --token).
+
+Stage Summary:
+- Hero now reads as a poster shot: BIG car filling the lower half, suspension bridge + skyline towers centered in the middle band of the 360° background, wheels welded to the lot asphalt by the cast shadow + contact blob.
+- Scroll-track geometry reminder for future sessions: track 300vh → scrollHeight 3960 @900px viewport → scrollable 3060 (progress = scrollY/3060). Mobile scrollable 2870 @844px.
+- Production still awaiting Vercel re-auth; commits c998738 → d55bd7b → 4a3df46 are ready to ship together.
