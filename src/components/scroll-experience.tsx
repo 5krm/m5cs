@@ -82,11 +82,15 @@ type CamKey = {
   /** portrait only: multiplies the lateral (z) camera offset again so the
    *  close-ups read more head-on — keeps the car flank out of the frame */
   mobileHeadOn?: number
-  /** ✏️ optional per-shot lens (vertical FOV, deg). Wider FOV + higher
-   *  camera = the grounded "documentary" look of the outro; omit to use
-   *  the breakpoint default (FOV_DESKTOP / FOV_MOBILE). GSAP tweens this
-   *  smoothly between shots. */
+  /** ✏️ optional per-shot DESKTOP lens (vertical FOV, deg). WIDE lens +
+   *  close camera = the "0.4× ultra-wide phone zoom" look: the car reads
+   *  big in the frame while the 360° city stays clearly visible around it
+   *  (narrow zoom crops the city away — never do that). Mobile keeps the
+   *  already-wide FOV_MOBILE unless `fovMobile` overrides it. GSAP tweens
+   *  this smoothly between shots. */
   fov?: number
+  /** ✏️ optional portrait-only lens override (see `fov`). */
+  fovMobile?: number
 }
 
 /* GROUNDING CHEAT-SHEET — how to keep any new keyframe believable:
@@ -94,6 +98,9 @@ type CamKey = {
  *   • aim the target BELOW the car's mid (y ≈ 0.5–0.65) so the camera
  *     tilts down and the photo's asphalt fills the space under the tires
  *   • stay ≥ 4.5 u away so the wheels + contact shadow remain in frame
+ *   • WIDE LENS RULE ("0.4× zoom"): when a shot moves CLOSE to the car,
+ *     widen `fov` (60–66) instead of cropping tighter — a wide lens keeps
+ *     the 360° city readable around the car; a narrow zoom kills it
  *   • the backdrop behind the car = the panorama direction OPPOSITE the
  *     camera (camera azimuth + 180°). Spread the camera's azimuth per shot
  *     to reveal different parts of the 360° photo as you scroll:
@@ -103,30 +110,34 @@ type CamKey = {
  *        camera azimuth ~134° → backdrop: bridge + skyline     (outro)
  */
 const KEYS = {
-  /** 0% — elevated rear-3/4 stance. Camera on the quay side where the
-   *  suspension bridge + skyline light the frame above the car; the raised
-   *  position + downward aim park the car ON the wet asphalt.
+  /** 0% — BIG car, city in front. Camera pulled IN (d ≈ 5.8, was 8.3) on a
+   *  56° wide lens: the car fills the frame while the suspension bridge +
+   *  skyline stay fully visible above it. Height 2.4 + low aim tilts the
+   *  lens down hard so the wheels project ~7° BELOW the quay line — the
+   *  car parks on the lot asphalt, never on the curb/walkway.
    *  ✏️ pos[1] (height): raise if wheels still touch the water band. */
-  hero: { pos: [-6.8, 2.2, 4.8], target: [0, 0.58, 0], mobileF: 1.3 },
-  /** state 1 — front 3/4 on the headlights. Height 1.1 (was 0.5 — the old
-   *  bumper cam hid the wheels and read as floating). Backdrop: open water
-   *  + silo lamps across the bay.
+  hero: { pos: [-4.75, 2.4, 3.35], target: [0, 0.48, 0], mobileF: 1.3, fov: 56 },
+  /** state 1 — front 3/4 on the headlights, “0.4× ultra-wide” close-up:
+   *  66° lens at d ≈ 4.9 keeps the whole nose + the silo/water district in
+   *  frame (the old 45° bumper-zoom cropped the city out entirely).
    *  ✏️ pos[2] (z): bigger → more flank visible, smaller → head-on nose. */
-  front: { pos: [4.35, 1.35, 3.35], target: [1.75, 0.45, 0.28], mobileF: 2.0, mobileHeadOn: 0.55 },
+  front: { pos: [5.0, 2.3, 3.85], target: [1.55, 0.45, 0.3], mobileF: 2.0, mobileHeadOn: 0.55, fov: 66 },
   /** state 1.5 — invisible WAYPOINTS that arc the camera around the nose
    *  and the right-rear corner. Without them the front→rear tween would
-   *  drive the camera straight THROUGH the body.
+   *  drive the camera straight THROUGH the body. Wide lenses keep the city
+   *  reading during the sweep.
    *  ✏️ keep |x| ≥ 4.5 or |z| ≥ 2.4 so the lens never clips the paint. */
-  mid1: { pos: [5.2, 1.22, -2.7], target: [0.6, 0.5, 0], mobileF: 2.0, mobileHeadOn: 0.55 },
-  mid2: { pos: [-1.7, 1.7, -4.7], target: [-0.5, 0.45, 0], mobileF: 1.9, mobileHeadOn: 0.6 },
-  /** state 2 — rear taillights / diffuser / quad exhaust. Camera returns
-   *  to the quay-left side because THAT is where the photo's railing is
-   *  CLOSE and the lot asphalt runs right up to the car (the skyline-band
+  mid1: { pos: [5.2, 1.5, -2.7], target: [0.6, 0.5, 0], mobileF: 2.0, mobileHeadOn: 0.55, fov: 62 },
+  mid2: { pos: [-1.7, 2.1, -4.7], target: [-0.5, 0.45, 0], mobileF: 1.9, mobileHeadOn: 0.6, fov: 64 },
+  /** state 2 — rear taillights / diffuser / quad exhaust, 60° wide lens so
+   *  the bridge + skyline stay clear above the decklid. Camera returns to
+   *  the quay-left side because THAT is where the photo's railing is CLOSE
+   *  and the lot asphalt runs right up to the car (the skyline-band
    *  azimuth has a 10 m-wide bright walkway that made every right-side
    *  variant read as hovering). The front→rear journey still sweeps the
    *  panorama ~245° (silos → road → cranes → skyline → bridge), so the
    *  scroll reveals the full 360° even though hero/rear share a district. */
-  rear: { pos: [-6.0, 2.6, 3.2], target: [-1.85, 0.5, 0], mobileF: 1.8, mobileHeadOn: 0.5, fov: 50 },
+  rear: { pos: [-6.3, 2.5, 3.35], target: [-1.8, 0.52, 0], mobileF: 1.8, mobileHeadOn: 0.5, fov: 60 },
   /** closing wide elevated rear 3/4 for the end card — the user-approved
    *  "parked in the lot" framing (high camera, asphalt all around). */
   outro: { pos: [-6.9, 3.1, 7.2], target: [0, 1.15, 0], mobileF: 1.35 },
@@ -399,7 +410,9 @@ type FlatKey = { px: number; py: number; pz: number; tx: number; ty: number; tz:
 
 /** Flatten a keyframe; on portrait screens the pos→target offset is
  *  scaled by mobileF so the car never clips out of the narrow viewport.
- *  `fo` resolves the per-shot lens (or the breakpoint default). */
+ *  `fo` resolves the per-shot lens — the ultra-wide `fov` values are a
+ *  DESKTOP concern (desktop default 45° is narrow); portrait already uses
+ *  the wide FOV_MOBILE, so only an explicit `fovMobile` overrides it. */
 function flattenKey(k: CamKey, mobile: boolean): FlatKey {
   let [px, py, pz] = k.pos
   const [tx, ty, tz] = k.target
@@ -408,7 +421,8 @@ function flattenKey(k: CamKey, mobile: boolean): FlatKey {
     py = ty + (py - ty) * k.mobileF
     pz = tz + (pz - tz) * k.mobileF * (k.mobileHeadOn ?? 1)
   }
-  return { px, py, pz, tx, ty, tz, fo: k.fov ?? (mobile ? FOV_MOBILE : FOV_DESKTOP) }
+  const fo = mobile ? (k.fovMobile ?? FOV_MOBILE) : (k.fov ?? FOV_DESKTOP)
+  return { px, py, pz, tx, ty, tz, fo }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
