@@ -80,3 +80,31 @@ Stage Summary:
 - Assets: `public/models/bmw-m5-cs/` (glTF + license); scene component: `src/components/bmw-drift-scene.tsx` (client-only, dynamic import, gradient fallback while loading).
 - License compliance: visible "BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0" micro-credit in the hero's bottom-left corner.
 - Known artifacts: headless-browser FPS is not representative (software GL); stale error entries in the long-lived browser session predate the fix and do not reproduce on fresh loads.
+
+---
+Task ID: 3
+Agent: Z.ai Code (main agent)
+Task: Rebuild the hero into an interactive, scroll-driven 3D camera experience — pinned viewport, cinematic multi-stage inspection of the gray BMW M5 CS (wide drift pose → low front-bullper focus → rear/diffuser focus → closing wide shot), using vanilla Three.js + GSAP ScrollTrigger (scrub 1.2) + Lenis momentum scrolling.
+
+Work Log:
+- Installed gsap@3.15.0 + lenis@1.3.26 (three@0.186 / @types/three already present); imported `lenis/dist/lenis.css` for the required `.lenis` scroll rules.
+- Created `src/components/scroll-experience.tsx` (client component owning the fixed canvas + fixed UI overlay + all choreography):
+  - Pinned-viewport architecture: fixed full-viewport canvas (z-0) + fixed overlay (z-10) driven by an invisible 440vh scroll track — jitter-free equivalent of ScrollTrigger pinning under Lenis.
+  - Camera rig: single `cam` flat state {px..tz} animated by ONE master GSAP timeline (scrub 1.2, `power2.inOut` per act, dwell holds at 0.30–0.42 and 0.72–0.84) and applied every frame via `camera.position.set()` + `camera.lookAt(cam.t*)` so target tracking is always fluid. Timeline doubles as the overlay director (hero copy fade-out, stage captions, closing card).
+  - ✏️ MARKED EDIT BLOCK: `KEYS` (hero/front/rear/outro pos+target) with per-key `mobileF` distance multiplier + optional `mobileHeadOn` azimuth factor for portrait; `flattenKey()` adapts keyframes; FOV 45 desktop / 60 mobile via `gsap.matchMedia` (auto rebuild + cleanup on breakpoint crossing).
+  - Car: GLTFLoader on the existing `/models/bmw-m5-cs/scene.gltf`; `buildCarRig()` normalizes ANY model (centers footprint, grounds y=0, longest span → 4.6 units) so keyframes fit without retuning; repaints Bodyshell/Bonnet/Boot/DoorColor materials with satin gray clearcoat (#868c93), dark glass, hides showroom plates, enables castShadow; gentle settle-in entrance on load.
+  - Studio: canvas vignette backdrop (scene.background) + FogExp2, PMREM RoomEnvironment for reflections (self-contained, no HDR download), warm key SpotLight (shadow map 2K, PCFShadowMap — r186 removed PCFSoftShadowMap), cool rim, hemisphere fill, glossy dark floor + subtle additive light pool, headlight/taillight glow sprites.
+  - Presentation garnish: parked drift yaw (−0.14 rad) with idle sway/roll/bounce, pooled 384-particle rear-tire smoke (CPU integration + point-sprite shader; sprite size capped at 300px, near-camera fade via smoothstep so close-up states never flood).
+  - Resize: immediate `camera.updateProjectionMatrix()` + `renderer.setSize` + point-scale update, debounced `ScrollTrigger.refresh()` (150ms) for mobile address-bar storms. DPR capped at 2. `prefers-reduced-motion`: Lenis off, scrub instant, sway/smoke disabled.
+  - Full teardown: mm.revert + ScrollTrigger.killAll + ticker removal + lenis.destroy + deep scene dispose (geometries/materials/textures) + envTex/pmrem disposal + forceContextLoss + renderer.dispose; async model load guarded by a `disposed` flag.
+- Rewrote `src/app/page.tsx` as a thin server wrapper; overlay UI (exact NeuroLink nav/logo, star dots, hero copy/CTA, stage captions, closing card, CC-BY-4.0 attribution) moved into the experience component. Removed now-unused `.hero-shell`/overlay gradient classes from globals.css; deleted superseded `bmw-drift-scene.tsx`.
+- Verification & fixes through 3 agent-browser passes (desktop 1440×900 + mobile 390×844, real scroll with scrub settle):
+  - Pass 1: choreography proven (front/rear/end/rewind all reached) but paint blew out white, smoke point-sprites flooded close-ups (uncapped size, no near fade), floor reflection washed the lower frame, horizon seam visible → fixed all (env/exposure/key intensity down, smoke size cap + near fade + alpha 0.4, floor darkened, backdrop/fog rebalanced).
+  - Pass 2: instrumented runtime state via temporary `window.__scrollDebug` — camera/fov/aspect/progress were EXACTLY as designed; projection of car corners matched the screenshot px-for-px → the "clipped nose" on mobile was the flank sweeping frame-left at a 3/4 angle (aesthetic, not a bug) → added `mobileHeadOn` (front/rear pull toward head-on in portrait) + text-shadow on captions for contrast over the lit floor.
+  - Pass 3: mobile front = clean head-on fascia, mobile rear = full diffuser/exhaust profile; fresh-load console 100% clean (shadow warning eliminated via PCFShadowMap), zero page errors, lint 0/0, no horizontal overflow (390=390), reverse scrub rewinds to the exact hero pose with copy restored.
+
+Stage Summary:
+- Shipped `src/components/scroll-experience.tsx` + thin `src/app/page.tsx`: a scroll-scrubbed 4-state camera cinematic (hero drift pose → front → rear → outro) that fully rewinds in reverse, with Lenis momentum, pinned fixed-stage architecture, model-agnostic auto-fit, responsive portrait adaptation (FOV 60 + distance/head-on factors) and leak-free teardown.
+- Camera coordinates/targets live in one commented `KEYS` block for trivial retuning to any future model; smoke/sway/drift garnish each has a named on/off constant.
+- All prior NeuroLink hero elements preserved (nav, star dots, headline, CTA, license credit); superseded R3F drift scene deleted.
+- Headless-GPU caveats: model parse takes ~5s under SwiftShader (sub-second on real GPUs) and screenshots can catch mid-scrub poses if taken <1.5s after a scroll jump; both are environment artifacts, not product issues.
