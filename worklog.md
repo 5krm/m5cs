@@ -198,3 +198,22 @@ Work Log:
 Stage Summary:
 - The 3D stage is now a photographic light studio: 360° softbox panorama drives both backdrop and IBL, invisible 0.4 shadow-catcher floor, studio-graded lights, low-angle→front→rear scrub choreography on a 300vh track — every tweakable (KEYS, ENV_ROTATION_Y, BACKDROP_PITCH_X, FOV_*, exposure) documented in-file.
 - Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-lkxz58sfz-…).
+
+---
+Task ID: 8
+Agent: Z.ai Code (main agent)
+Task: Revert to commit 18c6105 (lakeside night 360 backdrop) per user request, then fix the two user-reported defects: (1) the car floated above the photo ground in hero/front/rear shots (only the outro framing looked parked), (2) the 360° panorama showed only one district — camera transitions did not reveal other parts of the image.
+
+Work Log:
+- Restored `src/components/scroll-experience.tsx` + `public/environment/night_city_lake_360.jpg` from 18c6105; deleted `public/textures/studio_360.jpg` (Task 7 direction rolled back).
+- Root-cause analysis: (a) floating = low, level cameras put the panorama's water/quay band behind the wheels; grounding only works when the camera is raised and tilted down (like the approved outro), because the wheels (finite distance) must project BELOW the photo's railing line (infinite skybox); (b) static backdrop = hero/rear/outro cameras all sat in the same ~135-155° azimuth quadrant, so all three dwelled on the same bridge view.
+- Tried and REMOVED a visible 3D asphalt disc (radius 16 → 4.2 iterations): it always read as a dark podium pasted over the photo's parking lines; grounding must come from camera geometry, not a visible floor. Kept the invisible ShadowMaterial catcher (r 7, opacity 0.45) with an in-file warning not to grow it into a disc.
+- New choreography in `scroll-experience.tsx` (all ✏️-commented): hero (-6.8,2.2,4.8)→(0,0.58,0) elevated 3/4, bridge+skyline backdrop, grounded; front (4.35,1.35,3.35)→(1.75,0.45,0.28) raised from the old 0.5 bumper-cam, silo/water backdrop; NEW waypoints mid1 (5.2,1.22,-2.7) + mid2 (-1.7,1.7,-4.7) arc the lens around the nose and right-rear corner (straight front→rear tween clipped the body); rear (-6.0,2.6,3.2)→(-1.85,0.5,0) — three right-side rear variants floated over the skyline band's 10 m-wide quay walkway, so rear returns to the quay-LEFT side where the railing is close and the lot runs to the tires; outro unchanged (user-approved). Act II split into three 0.1-duration tweens (0.42/0.52/0.62) — the journey sweeps the panorama ~245° (silos → road → port cranes → skyline → bridge).
+- Added optional per-shot `fov` to CamKey/FlatKey: GSAP-tweened `fo` applied in applyCamera() (updateProjectionMatrix only on change); rear uses fov 50; BACKDROP_PITCH_X 0.12 → 0.06 for tower headroom; lint 0/0 throughout.
+- Verified via agent-browser on localhost (1440×900): hero/front/mid-flank/rear/outro + 1750px mid-transition (port-cranes flank shot, no body clipping) + reverse scroll; mobile 390×844 hero/front/rear grounded with FOV 60 + mobileF; fresh-load console clean (the WebGL 'precision' error was a stale dev-only Fast Refresh artifact).
+- Deployed `vercel deploy --prod` → https://bmw-m5-cs-vert.vercel.app (HTTP 200, title OK); live screenshots confirm hero (bridge, grounded), rear (lot asphalt + benches + water), front (silo district); committed as git revert + choreography commit.
+
+Stage Summary:
+- Both user defects fixed and live: the car is parked ON the wet lot asphalt in all four dwell states (wheels below the quay line, real contact shadow), and each scroll transition now pans a different district of the 360° photo (bridge → silos/water → cranes/skyline flank → bridge), with the panorama fully swept across the journey.
+- Camera grounding rules documented in-file (GROUNDING RULE + GROUNDING CHEAT-SHEET + per-key comments): raise pos[1], aim target[1] low, keep distance ≥4.5, spread azimuths, use per-shot fov; rear must stay on the quay-left side.
+- Production: https://bmw-m5-cs-vert.vercel.app
