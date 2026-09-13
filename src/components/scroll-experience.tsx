@@ -5,26 +5,34 @@
  * ScrollExperience — scroll-driven 3D camera inspection (gray BMW M5 CS)
  * ═════════════════════════════════════════════════════════════════════════
  * Stack: vanilla three.js · GSAP + ScrollTrigger (scrub 1.2) · Lenis
- * Environment: photographic 360° equirectangular studio panorama
- * ('studio_360.jpg') — scene.background AND scene.environment, so the
- * paint reflects the real overhead softbox and studio walls.
  *
  * Choreography (scrubbed 1:1 with scroll — reverses fluidly when scrolling
  * back up, because everything is one timeline driven by ScrollTrigger):
  *
  *   progress   camera move                          overlay
  *   ─────────────────────────────────────────────────────────────────────
- *   0.00–0.30  HERO → FRONT   wide drift pose →    hero copy fades out
- *                             bumper close-up      front caption in/out
- *   0.42–0.72  FRONT → REAR   orbit along flank    rear caption in/out
- *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
+ *   0.00–0.30  HERO → FRONT   elevated 3/4 →     hero copy fades out
+ *                             nose (bg pans      front caption in/out
+ *                             bridge → water)
+ *   0.42–0.72  FRONT → MID →  arc around nose,   rear caption in/out
+ *              REAR           down the far flank
+ *                             (bg pans silos → road → port cranes)
+ *   0.84–1.00  REAR → OUTRO   pull back wide      closing card fades in
+ *
+ * GROUNDING RULE (why every camera is raised + tilted down): the 3D car
+ * stands on y = 0 while the photographic ground lives inside the panorama.
+ * A LOW, LEVEL camera puts the photo's water/quay band behind the wheels
+ * and the car reads as floating. A camera at ~1.1–2 u aiming DOWN at the
+ * car lays the photo's near-field asphalt under the tires — exactly like
+ * the approved outro framing. Keep every new keyframe compliant.
  *
  * The "pinned viewport" is a fixed full-viewport stage (canvas + UI
- * overlay) driven by an invisible 300vh scroll track — functionally a
+ * overlay) driven by an invisible 440vh scroll track — functionally a
  * ScrollTrigger pin, but perfectly jitter-free with Lenis on every browser.
  */
 
 import { useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import Image from 'next/image'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -39,22 +47,21 @@ const MODEL_URL = '/models/bmw-m5-cs/scene.gltf' // CC-BY-4.0 · fvrenbld
 const TARGET_LENGTH = 4.6 // car is normalized to this world length
 const FLIP_MODEL = false // set true if a swapped model faces backwards
 
-/* 360° equirectangular studio panorama — photographic light studio with a
- * huge overhead softbox, black cyc walls and a marked concrete floor
- * (user-provided 'studio_360.jpg'). ONE texture drives BOTH the visible
- * backdrop (scene.background) and the image-based lighting (PMREM →
- * scene.environment), so the car body naturally reflects the softbox. */
-const ENV_URL = '/textures/studio_360.jpg'
-/** ✏️ Yaw of the panorama (rad). Rotates WHICH WALL sits behind each camera
- * shot: the softbox lives at the image's horizontal center (+X direction at
- * yaw = 0). Background & environment rotations stay identical so the paint
- * reflections always match the visible backdrop. */
-const ENV_ROTATION_Y = 0
-/** ✏️ Pitch of the panorama (rad) — positive lifts the photographic floor
- * to meet the 3D floor (y = 0) and pushes the ceiling softbox up toward the
- * top of frame (true overhead studio look). Match on both background &
- * environment. */
-const BACKDROP_PITCH_X = 0.1
+/* 360° equirectangular panorama — night city across a lake (user-provided).
+ * ONE texture drives BOTH the visible backdrop (scene.background) and the
+ * image-based lighting (PMREM → scene.environment). */
+const ENV_URL = '/environment/night_city_lake_360.jpg'
+/** ✏️ Yaw of the panorama (rad). Places the skyline behind the hero camera,
+ * the suspension bridge behind the rear shot and the port cranes behind the
+ * front close-up. Background & environment rotations stay identical so the
+ * paint reflections always match the visible backdrop. */
+const ENV_ROTATION_Y = -0.19
+/** ✏️ Pitch of the panorama (rad) — nudges the photographic ground plane up
+ * under the car so the 3D floor (y = 0) visually coincides with the wet
+ * asphalt in the photo. Match on both background & environment.
+ * Raise it if the wheels still overlap the quay/water band in the photo;
+ * lower it if the skyline towers start clipping the top of the frame. */
+const BACKDROP_PITCH_X = 0.06
 
 /* ═══════════ 2. CAMERA KEYFRAMES — ✏️ EDIT HERE ══════════════════════
  * World space: car sits at the origin, nose pointing +X, ~4.6 units long,
@@ -75,23 +82,54 @@ type CamKey = {
   /** portrait only: multiplies the lateral (z) camera offset again so the
    *  close-ups read more head-on — keeps the car flank out of the frame */
   mobileHeadOn?: number
+  /** ✏️ optional per-shot lens (vertical FOV, deg). Wider FOV + higher
+   *  camera = the grounded "documentary" look of the outro; omit to use
+   *  the breakpoint default (FOV_DESKTOP / FOV_MOBILE). GSAP tweens this
+   *  smoothly between shots. */
+  fov?: number
 }
 
+/* GROUNDING CHEAT-SHEET — how to keep any new keyframe believable:
+ *   • camera height ≥ 1.1 u (2–3 u grounds best — see outro)
+ *   • aim the target BELOW the car's mid (y ≈ 0.5–0.65) so the camera
+ *     tilts down and the photo's asphalt fills the space under the tires
+ *   • stay ≥ 4.5 u away so the wheels + contact shadow remain in frame
+ *   • the backdrop behind the car = the panorama direction OPPOSITE the
+ *     camera (camera azimuth + 180°). Spread the camera's azimuth per shot
+ *     to reveal different parts of the 360° photo as you scroll:
+ *        camera azimuth ~145° → backdrop: bridge + skyline     (hero)
+ *        camera azimuth ~38°  → backdrop: open water + silos   (front)
+ *        camera azimuth ~208° → backdrop: skyline + port cranes (rear)
+ *        camera azimuth ~134° → backdrop: bridge + skyline     (outro)
+ */
 const KEYS = {
-  /** 0% — LOW-ANGLE WIDE: the camera skims the studio floor so the car
-   *  looms over the viewer in its parked drift stance; black cyc wall +
-   *  glowing softbox fill the background. Raise pos.y for a higher 3/4. */
-  hero: { pos: [-6.0, 0.78, 4.7], target: [0, 0.78, 0], mobileF: 1.35 },
-  /** step 1 — translate + zoom into the front bumper / headlights
-   *  (nose tip is at x ≈ +2.3; tuck pos closer for a tighter crop) */
-  front: { pos: [3.55, 0.52, 1.5], target: [2.1, 0.5, 0.05], mobileF: 2.15, mobileHeadOn: 0.45 },
-  /** step 2 — orbit around the flank to the rear diffuser, quad exhausts
-   *  and taillights. Keep z positive on BOTH keys so the tween sweeps
-   *  same-side; increase the |pos.x| gap for a wider orbit arc. */
-  rear: { pos: [-3.95, 0.66, 1.75], target: [-2.0, 0.58, 0], mobileF: 2.0, mobileHeadOn: 0.45 },
-  /** closing wide elevated rear 3/4 for the end card — lift pos.y and
-   *  target.y together to raise the horizon in frame */
-  outro: { pos: [-6.6, 2.6, 6.8], target: [0, 1.0, 0], mobileF: 1.35 },
+  /** 0% — elevated rear-3/4 stance. Camera on the quay side where the
+   *  suspension bridge + skyline light the frame above the car; the raised
+   *  position + downward aim park the car ON the wet asphalt.
+   *  ✏️ pos[1] (height): raise if wheels still touch the water band. */
+  hero: { pos: [-6.8, 2.2, 4.8], target: [0, 0.58, 0], mobileF: 1.3 },
+  /** state 1 — front 3/4 on the headlights. Height 1.1 (was 0.5 — the old
+   *  bumper cam hid the wheels and read as floating). Backdrop: open water
+   *  + silo lamps across the bay.
+   *  ✏️ pos[2] (z): bigger → more flank visible, smaller → head-on nose. */
+  front: { pos: [4.35, 1.35, 3.35], target: [1.75, 0.45, 0.28], mobileF: 2.0, mobileHeadOn: 0.55 },
+  /** state 1.5 — invisible WAYPOINTS that arc the camera around the nose
+   *  and the right-rear corner. Without them the front→rear tween would
+   *  drive the camera straight THROUGH the body.
+   *  ✏️ keep |x| ≥ 4.5 or |z| ≥ 2.4 so the lens never clips the paint. */
+  mid1: { pos: [5.2, 1.22, -2.7], target: [0.6, 0.5, 0], mobileF: 2.0, mobileHeadOn: 0.55 },
+  mid2: { pos: [-1.7, 1.7, -4.7], target: [-0.5, 0.45, 0], mobileF: 1.9, mobileHeadOn: 0.6 },
+  /** state 2 — rear taillights / diffuser / quad exhaust. Camera returns
+   *  to the quay-left side because THAT is where the photo's railing is
+   *  CLOSE and the lot asphalt runs right up to the car (the skyline-band
+   *  azimuth has a 10 m-wide bright walkway that made every right-side
+   *  variant read as hovering). The front→rear journey still sweeps the
+   *  panorama ~245° (silos → road → cranes → skyline → bridge), so the
+   *  scroll reveals the full 360° even though hero/rear share a district. */
+  rear: { pos: [-6.0, 2.6, 3.2], target: [-1.85, 0.5, 0], mobileF: 1.8, mobileHeadOn: 0.5, fov: 50 },
+  /** closing wide elevated rear 3/4 for the end card — the user-approved
+   *  "parked in the lot" framing (high camera, asphalt all around). */
+  outro: { pos: [-6.9, 3.1, 7.2], target: [0, 1.15, 0], mobileF: 1.35 },
 } satisfies Record<string, CamKey>
 
 const FOV_DESKTOP = 45
@@ -102,7 +140,7 @@ const FOV_MOBILE = 60
 const BASE_YAW = -0.14 // parked "drift" angle of the car (rad)
 const IDLE_SWAY = true // subtle breathing sway so the car feels alive
 const SMOKE_ENABLED = true // rear-tire smoke puffs
-const SMOKE_PER_SECOND = 105 // thin studio haze — heavy smoke floods the close-ups
+const SMOKE_PER_SECOND = 105 // thin night haze — heavy smoke floods the close-ups
 const SMOKE_COUNT = 240
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -126,8 +164,8 @@ function makeSoftCircleTexture(): THREE.CanvasTexture {
   return tex
 }
 
-/** Canvas-drawn dark vignette (old flat-spotlight backdrop) — REMOVED:
- * replaced by the photographic 360° studio panorama (ENV_URL above). */
+/** Dark seamless studio vignette used as scene.background — REMOVED:
+ * replaced by the 360° lakeside night panorama (ENV_URL). */
 
 /* ══════════════════════════════════════════════════════════════════════
  * Car — load the real glTF, normalize + restyle it
@@ -140,11 +178,11 @@ const GLASS = new Set(['Windowrf1Mtl'])
 const satinGrayPaint = () =>
   new THREE.MeshPhysicalMaterial({
     color: '#868c93',
-    metalness: 0.7, // a touch of dielectric body color so the paint reads on dark walls
+    metalness: 0.82,
     roughness: 0.34,
     clearcoat: 1,
     clearcoatRoughness: 0.18,
-    envMapIntensity: 1.55, // picks up the softbox highlight streak + bright concrete floor bounce
+    envMapIntensity: 1.25, // picks up the night city glow + lake shimmer
   })
 
 const darkGlass = () =>
@@ -154,7 +192,7 @@ const darkGlass = () =>
     roughness: 0.1,
     clearcoat: 1,
     clearcoatRoughness: 0.06,
-    envMapIntensity: 1.5,
+    envMapIntensity: 1.3,
   })
 
 type CarRig = {
@@ -198,7 +236,7 @@ function buildCarRig(source: THREE.Object3D): CarRig {
         mats[i] = glass
         replaced = true
       } else if (mats[i] && (mats[i] as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
-        ;(mats[i] as THREE.MeshStandardMaterial).envMapIntensity = 0.9
+        ;(mats[i] as THREE.MeshStandardMaterial).envMapIntensity = 0.7
       }
     }
     if (replaced) obj.material = Array.isArray(obj.material) ? mats : mats[0]
@@ -245,7 +283,7 @@ const SMOKE_FRAGMENT = /* glsl */ `
   uniform sampler2D uMap;
   varying float vAlpha;
   void main() {
-    float a = texture2D(uMap, gl_PointCoord).a * vAlpha * 0.7; // studio-soft
+    float a = texture2D(uMap, gl_PointCoord).a * vAlpha * 0.7; // night-subtle
     if (a < 0.004) discard;
     gl_FragColor = vec4(0.84, 0.86, 0.9, a);
   }
@@ -357,10 +395,11 @@ function createSmokeSystem(softTex: THREE.Texture) {
  * Camera-rig math
  * ══════════════════════════════════════════════════════════════════════ */
 
-type FlatKey = { px: number; py: number; pz: number; tx: number; ty: number; tz: number }
+type FlatKey = { px: number; py: number; pz: number; tx: number; ty: number; tz: number; fo: number }
 
 /** Flatten a keyframe; on portrait screens the pos→target offset is
- *  scaled by mobileF so the car never clips out of the narrow viewport. */
+ *  scaled by mobileF so the car never clips out of the narrow viewport.
+ *  `fo` resolves the per-shot lens (or the breakpoint default). */
 function flattenKey(k: CamKey, mobile: boolean): FlatKey {
   let [px, py, pz] = k.pos
   const [tx, ty, tz] = k.target
@@ -369,7 +408,7 @@ function flattenKey(k: CamKey, mobile: boolean): FlatKey {
     py = ty + (py - ty) * k.mobileF
     pz = tz + (pz - tz) * k.mobileF * (k.mobileHeadOn ?? 1)
   }
-  return { px, py, pz, tx, ty, tz }
+  return { px, py, pz, tx, ty, tz, fo: k.fov ?? (mobile ? FOV_MOBILE : FOV_DESKTOP) }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -378,8 +417,34 @@ function flattenKey(k: CamKey, mobile: boolean): FlatKey {
 
 const NAV_LINKS = ['Overview', 'Performance', 'Design', 'Specs'] as const
 
-/* (hero star-dot decorations removed — they belonged to the night-sky
- * backdrop; the photographic studio needs no synthetic starlight) */
+type StarDot = {
+  top: string
+  side: 'left' | 'right'
+  offset: string
+  size: number
+  opacity: number
+  glow?: string
+}
+
+const STAR_DOTS: StarDot[] = [
+  { top: '14%', side: 'left', offset: '14%', size: 3, opacity: 0.5, glow: '0 0 6px 1px oklch(0.85 0.08 85 / 0.5)' },
+  { top: '28%', side: 'right', offset: '18%', size: 2, opacity: 0.4, glow: '0 0 5px 1px oklch(0.85 0.08 85 / 0.4)' },
+  { top: '49%', side: 'left', offset: '10%', size: 2, opacity: 0.35 },
+  { top: '60%', side: 'right', offset: '12%', size: 3, opacity: 0.3, glow: '0 0 6px 1px oklch(0.85 0.08 85 / 0.35)' },
+  { top: '21%', side: 'left', offset: '33%', size: 2, opacity: 0.3 },
+  { top: '40%', side: 'right', offset: '33%', size: 2, opacity: 0.45 },
+]
+
+function starDotStyle(dot: StarDot): CSSProperties {
+  return {
+    top: dot.top,
+    width: dot.size,
+    height: dot.size,
+    opacity: dot.opacity,
+    boxShadow: dot.glow ?? 'none',
+    ...(dot.side === 'left' ? { left: dot.offset } : { right: dot.offset }),
+  }
+}
 
 /* ══════════════════════════════════════════════════════════════════════
  * Component
@@ -421,22 +486,22 @@ export default function ScrollExperience() {
     // filtered shadow path (renders soft contacts with a 2K map)
     renderer.shadowMap.type = THREE.PCFShadowMap
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.05 // ACES + modest exposure keeps the softbox whites short of clipping
+    renderer.toneMappingExposure = 1.15 // lifts the night IBL without clipping the city lights
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
-    /* ── Scene: photographic studio — 360° equirect panorama ───────
+    /* ── Scene: lakeside night city — 360° equirect panorama ─────
      * The SAME texture is the visible backdrop and the IBL source
      * (PMREM pre-filter), so the metallic paint reflects exactly the
-     * softbox / walls / floor you see behind the car. */
+     * skyline / lake / bridges you see behind the car. */
     const scene = new THREE.Scene()
-    renderer.setClearColor(0x0a0b0d, 1) // fallback until the panorama streams in
+    renderer.setClearColor(0x04050a, 1) // fallback until the panorama streams in
 
     scene.backgroundRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0)
     scene.environmentRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0) // keep reflections aligned
 
     const pmrem = new THREE.PMREMGenerator(renderer)
-    let studioTex: THREE.Texture | null = null
-    let studioEnvRT: THREE.WebGLRenderTarget | null = null
+    let lakeTex: THREE.Texture | null = null
+    let lakeEnvRT: THREE.WebGLRenderTarget | null = null
 
     new THREE.TextureLoader().load(
       ENV_URL,
@@ -448,24 +513,24 @@ export default function ScrollExperience() {
         tex.mapping = THREE.EquirectangularReflectionMapping // 2:1 photo → skybox + IBL
         tex.colorSpace = THREE.SRGBColorSpace
         tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
-        studioTex = tex
+        lakeTex = tex
         scene.background = tex
         scene.backgroundIntensity = 1.0
-        studioEnvRT = pmrem.fromEquirectangular(tex) // roughness-aware reflections
-        scene.environment = studioEnvRT.texture
+        lakeEnvRT = pmrem.fromEquirectangular(tex) // roughness-aware reflections
+        scene.environment = lakeEnvRT.texture
       },
       undefined,
-      (error) => console.warn('[scroll-experience] studio panorama failed to load:', error),
+      (error) => console.warn('[scroll-experience] panorama failed to load:', error),
     )
 
     /* ── Camera ────────────────────────────────────────────────────── */
     const camera = new THREE.PerspectiveCamera(FOV_DESKTOP, window.innerWidth / window.innerHeight, 0.1, 160)
 
     /* ── Lights ────────────────────────────────────────────────────── */
-    const key = new THREE.SpotLight(0xf5f8ff, 190) // overhead "softbox" key — casts the contact shadows
-    key.position.set(0.4, 9, 1.2) // almost directly above → shadow pools straight under the tires
-    key.angle = 0.75
-    key.penumbra = 0.9
+    const key = new THREE.SpotLight(0xdfe9ff, 340) // cool night floodlight — casts the contact shadows
+    key.position.set(3, 14, 4) // steep angle → tight shadow that hugs the tires
+    key.angle = 0.55
+    key.penumbra = 0.55
     key.decay = 2
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
@@ -476,19 +541,25 @@ export default function ScrollExperience() {
     key.target.position.set(0, 0.5, 0)
     scene.add(key, key.target)
 
-    const rim = new THREE.DirectionalLight(0xe8edf4, 1.1) // soft neutral fill so the flanks don't go pure black
-    rim.position.set(-7, 4, -5)
+    const rim = new THREE.DirectionalLight(0x9fc0ee, 2.4) // moonlit edge light
+    rim.position.set(-8, 5, -6)
     scene.add(rim)
 
-    scene.add(new THREE.HemisphereLight(0x3d434b, 0x131518, 0.5)) // studio wall/floor bounce
+    scene.add(new THREE.HemisphereLight(0x27364e, 0x0a0c10, 0.5)) // night sky / asphalt bounce
 
-    /* ── Floor (invisible ShadowMaterial shadow-catcher) ─────────────────────────────────────── */
+    /* ── Floor — invisible shadow-catcher ───────────────────────────
+     * GROUNDING comes from CAMERA GEOMETRY, not from a visible 3D floor:
+     * every keyframe is raised (~1.4–2.2 u) and aimed DOWN at the car so
+     * the wheels land BELOW the photo's quay-railing line, on the lot
+     * asphalt painted in the panorama. This transparent catcher then adds
+     * the real cast shadow that welds the tires to that asphalt.
+     * (A visible 3D asphalt disc was tried and removed — it always reads
+     * as a podium pasted over the photo's parking lines.)
+     * ✏️ If any shot still floats: raise that keyframe's pos[1] and/or
+     * lower its target[1] — do NOT grow this catcher into a visible disc. */
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(60, 72),
-      // Invisible shadow-catcher ONLY — the concrete floor is PART of the
-      // 360° panorama. Opacity 0.4 keeps the photo floor's sheen visible
-      // through the shadow so the tires look planted on the studio floor.
-      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.4 }),
+      new THREE.CircleGeometry(7, 64),
+      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.45 }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
@@ -515,7 +586,7 @@ export default function ScrollExperience() {
       sprite.scale.setScalar(size)
       carGroup.add(sprite)
     }
-    addGlow(2.08, 0.58, 0.55, 0xcfe0ff, 0.5, 0.7) // headlights — Laserlight glare
+    addGlow(2.08, 0.58, 0.55, 0xcfe0ff, 0.5, 0.7) // headlights — night glare
     addGlow(2.08, 0.58, -0.55, 0xcfe0ff, 0.5, 0.7)
     addGlow(-2.12, 0.62, 0.55, 0xff3b3b, 0.38, 0.62) // taillights
     addGlow(-2.12, 0.62, -0.55, 0xff3b3b, 0.38, 0.62)
@@ -551,10 +622,14 @@ export default function ScrollExperience() {
     updatePointScale()
 
     /* ── Camera rig state — animated by GSAP, applied every frame ──── */
-    const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
+    const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fo: FOV_DESKTOP }
     const applyCamera = () => {
       camera.position.set(cam.px, cam.py, cam.pz)
       camera.lookAt(cam.tx, cam.ty, cam.tz) // target tracked every frame
+      if (camera.fov !== cam.fo) {
+        camera.fov = cam.fo // per-shot lens (tweened by GSAP)
+        camera.updateProjectionMatrix()
+      }
     }
 
     /* ── Per-frame world updates (sway, smoke) ─────────────────────── */
@@ -578,6 +653,8 @@ export default function ScrollExperience() {
       const K = {
         hero: flattenKey(KEYS.hero, mobile),
         front: flattenKey(KEYS.front, mobile),
+        mid1: flattenKey(KEYS.mid1, mobile),
+        mid2: flattenKey(KEYS.mid2, mobile),
         rear: flattenKey(KEYS.rear, mobile),
         outro: flattenKey(KEYS.outro, mobile),
       }
@@ -604,8 +681,13 @@ export default function ScrollExperience() {
 
       /* dwell on the front bumper (0.30 → 0.42) — no camera tweens */
 
-      /* Act II — FRONT → REAR (0.42 → 0.72) */
-      tl.to(cam, { ...K.rear, duration: 0.3 }, 0.42)
+      /* Act II — FRONT → MID1 → MID2 → REAR (0.42 → 0.72): three tweens
+       * around the nose and the right-rear corner (never through the body).
+       * The sweeping reposition pans the 360° backdrop ~245°: silo district
+       * → tree-lined road → port cranes → skyline → back to the bridge. */
+      tl.to(cam, { ...K.mid1, duration: 0.1 }, 0.42)
+      tl.to(cam, { ...K.mid2, duration: 0.1 }, 0.52)
+      tl.to(cam, { ...K.rear, duration: 0.1 }, 0.62)
       tl.fromTo(capRear, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.58)
       tl.to(capRear, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.78)
 
@@ -693,8 +775,8 @@ export default function ScrollExperience() {
         else if (m) disposeMat(m)
       })
       softTex.dispose()
-      studioTex?.dispose()
-      studioEnvRT?.dispose()
+      lakeTex?.dispose()
+      lakeEnvRT?.dispose()
       scene.background = null
       scene.environment = null
       pmrem.dispose()
@@ -708,17 +790,16 @@ export default function ScrollExperience() {
   return (
     <main className="relative w-full bg-[#050608] text-[#f2efe7]">
       {/*
-        Invisible scroll track — its height (300vh) is the scroll distance
-        ScrollTrigger scrubs the camera timeline through (the canvas itself
-        stays fixed = functional pin). Fully reversible.
+        Invisible scroll track — its height (440vh) is the scroll distance
+        ScrollTrigger scrubs the camera timeline through. Fully reversible.
       */}
-      <div ref={trackRef} aria-hidden="true" className="h-[300vh]" />
+      <div ref={trackRef} aria-hidden="true" className="h-[440vh]" />
 
       {/* Fixed 3D stage */}
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label="3D BMW M5 CS studio inspection — scroll to explore the car"
+        aria-label="3D BMW M5 CS lakeside night inspection — scroll to explore the car"
         className="fixed inset-0 z-0 block h-full w-full"
       />
 
@@ -779,6 +860,15 @@ export default function ScrollExperience() {
 
         {/* ── Hero layer — fades out as the camera leaves the hero state ── */}
         <div ref={heroLayerRef} className="absolute inset-0 flex flex-col">
+          {STAR_DOTS.map((dot) => (
+            <span
+              key={`${dot.top}-${dot.side}-${dot.offset}`}
+              aria-hidden="true"
+              className="pointer-events-none absolute rounded-full bg-[#e8ddc4]"
+              style={starDotStyle(dot)}
+            />
+          ))}
+
           <section className="mt-auto flex flex-col items-center px-[clamp(20px,8vw,120px)] pb-[clamp(56px,9vh,90px)] text-center">
             <div aria-hidden="true" className="mb-[clamp(20px,3vh,32px)] flex items-center gap-4">
               <span className="h-px w-12 bg-[linear-gradient(90deg,transparent,#FFB733)]" />
@@ -828,7 +918,7 @@ export default function ScrollExperience() {
             Laserlight &amp; Kidney Grille
           </h2>
           <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
-            Illuminated M Laserlights and widened kidneys under the overhead softbox.
+            Illuminated M Laserlights and widened kidneys against the harbour glow.
           </p>
         </div>
 
@@ -843,7 +933,7 @@ export default function ScrollExperience() {
             Diffuser &amp; Quad Exhaust
           </h2>
           <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
-            Blacked-out taillights and quad pipes beneath the studio key light.
+            Blacked-out taillights and quad pipes against the glowing bridge line.
           </p>
         </div>
 
