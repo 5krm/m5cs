@@ -217,3 +217,20 @@ Stage Summary:
 - Both user defects fixed and live: the car is parked ON the wet lot asphalt in all four dwell states (wheels below the quay line, real contact shadow), and each scroll transition now pans a different district of the 360° photo (bridge → silos/water → cranes/skyline flank → bridge), with the panorama fully swept across the journey.
 - Camera grounding rules documented in-file (GROUNDING RULE + GROUNDING CHEAT-SHEET + per-key comments): raise pos[1], aim target[1] low, keep distance ≥4.5, spread azimuths, use per-shot fov; rear must stay on the quay-left side.
 - Production: https://bmw-m5-cs-vert.vercel.app
+
+---
+Task ID: 9
+Agent: Z.ai Code (main agent)
+Task: Per user feedback on the live Task 8 build — (1) hero: the car clipped into the quay curb and read too small; make the car BIG with the city clearly visible in front of it, (2) in the remaining sections the "zoom-ins" must feel like a wide 0.4× phone-camera zoom so the 360° city stays clearly visible instead of being cropped away.
+
+Work Log:
+- Root cause: Task 8's hero stood 8.3 u back on a 45° lens (small car; its front overlapped the bench/quay line = "داخلة بالرصيف"), and the front dwell (d 4.1, fov 45) cropped the city out entirely — a narrow telephoto zoom kills the 360° context.
+- New rule added to the in-file GROUNDING CHEAT-SHEET: WIDE LENS RULE — when a shot moves close to the car, widen `fov` (60–66) instead of cropping tighter; wide lens keeps the city readable around a big car.
+- KEYS retuned (all ✏️-commented): hero pos [-6.8,2.2,4.8]→[-4.75,2.4,3.35], target y 0.58→0.48, fov 56 — car ~40% bigger, contact point ~7° further below the quay line (curb fixed), bridge+skyline fully visible above. front [4.35,1.35,3.35]→[5.0,2.3,3.85], fov 66 (ultra-wide 0.4× look; iterated 1.42→1.75→2.05→2.3 height via screenshots until the wheels landed on the lined asphalt instead of the walkway). mid1 y 1.22→1.5 fov 62; mid2 y 1.7→2.1 fov 64 (side-profile float fixed); rear [-6.0,2.6,3.2]→[-6.3,2.5,3.35] fov 60. outro untouched (user-approved).
+- CamKey semantics: per-shot `fov` is now DESKTOP-only (portrait already uses wide FOV_MOBILE 60; new optional `fovMobile` override added to type + flattenKey) — verified hero/front/rear on 390×844: big grounded car, city clear, no cropping.
+- Verified localhost via agent-browser: desktop 1440×900 sequence hero → front (0.389) → head-on mid (0.47) → cranes side profile (0.57) → rear (0.80) → outro (1.0) → reverse rewind; all grounded, city visible in every dwell, no body clipping, no new console errors (only the known dev-only Fast Refresh WebGL artifact). lint 0/0. Committed c998738.
+- Deploy BLOCKED: Vercel CLI session lost its credentials between sessions (`vercel whoami` → Logged out; no token in env/dotfiles/tool-results). `bunx vercel deploy --prod` errors with "No existing credentials found". Needs `vercel login` or `--token <TOKEN>` from the user; project link (.vercel/project.json → bmw-m5-cs) is intact so a token deploy will hit the same domain.
+
+Stage Summary:
+- All three user complaints fixed locally and browser-verified: hero = BIG grounded car with the bridge/skyline city clearly in front, no curb clipping; every close-up now uses the wide 0.4×-style lens (fov 60–66 desktop) so the 360° city stays readable throughout the scroll; transitions (head-on nose, cranes side profile) equally grounded.
+- Production NOT updated this round: Vercel auth expired in this sandbox — run `bunx vercel login` yourself or hand me a token and I'll `bunx vercel deploy --prod --token …` immediately (code is committed at c998738, ready to ship).
