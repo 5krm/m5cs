@@ -28,3 +28,25 @@ Stage Summary:
 - Video autoplays muted+loop with a JS pause-resume guarantee; fallback gradient shows if the CDN is unreachable.
 - Responsive: clamp()-based spacing/typography, wrapped navbar, svh unit for mobile browser chrome; verified at desktop/tablet/mobile with no overflow.
 - Two documented micro-adaptations of the spec for responsiveness: H1 uses clamp capped at 44px (exact 44px on desktop), and the secondary-text `<br>` is desktop-only (natural wrap on mobile).
+
+---
+Task ID: 2
+Agent: Z.ai Code (main agent)
+Task: Replace the hero background video with a real-time 3D scene — a gray BMW M5 CS drifting donuts with tire smoke — then restyle the car to match a user-uploaded reference photo.
+
+Work Log:
+- Installed three@0.186, @react-three/fiber@9.7, @react-three/drei@10.7 (+ @types/three).
+- Created `src/components/bmw-drift-scene.tsx` (client-only, ~600 lines):
+  - Car built from an extruded side profile (wheel arches cut via absarc), dark glasshouse, kidney grilles with mesh slats, LED headlights + additive glow billboards, taillight strip, mirrors, splitter, side skirts, diffuser, shark fin, quad exhausts, canvas-drawn BMW roundels.
+  - Drift simulation: circular path (R=5.2, ω=0.85) with 0.55 rad slip angle, counter-steer + wobble, rear wheels spinning at 30 rad/s vs 14 front, body roll/pitch/bounce.
+  - Tire smoke: 320-particle pooled THREE.Points system with custom ShaderMaterial (per-particle size/alpha attributes, canvas soft-circle sprite), 165 spawns/s from rear-wheel world positions, drag + buoyancy, ring-shaped haze around the donut.
+  - Baked canvas skid-ring texture on the ground + ContactShadows; module-scope mutable stores (carChannel/smokeStore) satisfy the new React Compiler lint rules (react-hooks/immutability).
+- Updated `src/app/page.tsx`: removed the background video + autoplay effect; scene loaded via next/dynamic ssr:false with gradient fallback. All overlays/dots/navbar/hero copy unchanged.
+- Camera iterations (verified via agent-browser screenshots): fixed orbit → chase cam → final yaw-following rear-3/4 chase (distance 8.6, height 2.6, ±0.7 rad slow swing, pointer parallax, aim y=0.5) so the framing always flatters the car; scene background #0d1017 to remove the horizon seam.
+- Restyled to match the uploaded photo: satin gloss gray #9aa0a5 paint (clearcoat), gloss-black wheels with brake discs + red calipers, larger mesh kidneys, white LED headlights, dark red taillights, gloss-black mirrors/skirts, shark fin, bigger front lip.
+- Verified: lint 0 problems; two desktop frames 10 s apart show continuous drift with stable framing; mobile 390×844 no overflow, CTA visible; zero console/page errors; dev.log clean throughout.
+
+Stage Summary:
+- Hero background is now a live WebGL drift scene (`bmw-drift-scene.tsx`) instead of the CDN video; the video URL/effect was fully removed.
+- Car styling now mirrors the user's reference photo (gray M5 CS, black wheels, white LEDs).
+- All prior hero elements (navbar, ornament, headline, copy, CTA, overlays, star dots) preserved and re-verified.

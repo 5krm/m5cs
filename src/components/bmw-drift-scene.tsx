@@ -13,6 +13,7 @@ const SLIP = 0.55 // drift angle (rad) — nose points into the circle
 /* Shared channel: the car writes positions, smoke/camera read them */
 const carChannel = {
   center: new THREE.Vector3(),
+  yaw: 0,
   rearLeft: new THREE.Vector3(),
   rearRight: new THREE.Vector3(),
 }
@@ -165,7 +166,12 @@ function WheelAssembly({
         </mesh>
         <mesh rotation-x={Math.PI / 2}>
           <cylinderGeometry args={[0.185, 0.185, 0.14, 24]} />
-          <meshStandardMaterial color="#14161a" metalness={0.8} roughness={0.4} />
+          <meshStandardMaterial color="#1d2126" metalness={0.8} roughness={0.4} />
+        </mesh>
+        {/* brake disc visible through the spokes */}
+        <mesh rotation-x={Math.PI / 2}>
+          <cylinderGeometry args={[0.15, 0.15, 0.05, 24]} />
+          <meshStandardMaterial color="#43484f" metalness={0.9} roughness={0.35} />
         </mesh>
         {spokes.map((angle) => (
           <mesh
@@ -174,22 +180,22 @@ function WheelAssembly({
             rotation-z={-angle}
           >
             <boxGeometry args={[0.06, 0.3, 0.045]} />
-            <meshStandardMaterial color="#a7adb5" metalness={0.92} roughness={0.28} />
+            <meshStandardMaterial color="#14161a" metalness={0.85} roughness={0.32} />
           </mesh>
         ))}
         <mesh position={[0, 0, side * 0.115]}>
           <torusGeometry args={[0.2, 0.018, 10, 32]} />
-          <meshStandardMaterial color="#b6bbc2" metalness={0.95} roughness={0.22} />
+          <meshStandardMaterial color="#1b1e23" metalness={0.9} roughness={0.3} />
         </mesh>
         <mesh position={[0, 0, side * 0.1]} rotation-x={Math.PI / 2}>
           <cylinderGeometry args={[0.05, 0.05, 0.04, 16]} />
-          <meshStandardMaterial color="#c9ced5" metalness={0.9} roughness={0.3} />
+          <meshStandardMaterial color="#26292f" metalness={0.85} roughness={0.32} />
         </mesh>
       </group>
       {/* red M caliper — steers with the knuckle, never spins */}
       <mesh position={[0.15, 0.1, 0]} rotation-z={-0.5}>
         <boxGeometry args={[0.2, 0.15, 0.11]} />
-        <meshStandardMaterial color="#b3252c" metalness={0.35} roughness={0.45} />
+        <meshStandardMaterial color="#cf2b31" metalness={0.35} roughness={0.45} />
       </mesh>
     </group>
   )
@@ -247,6 +253,7 @@ function DriftCar() {
 
     // publish car-center + rear-wheel world positions for smoke & camera
     carChannel.center.set(px, 0, pz)
+    carChannel.yaw = root.current.rotation.y
     if (steerRL.current) steerRL.current.getWorldPosition(carChannel.rearLeft)
     if (steerRR.current) steerRR.current.getWorldPosition(carChannel.rearRight)
   })
@@ -257,12 +264,12 @@ function DriftCar() {
         {/* painted body */}
         <mesh geometry={bodyGeometry}>
           <meshPhysicalMaterial
-            color="#8b9097"
-            metalness={0.75}
+            color="#9aa0a5"
+            metalness={0.8}
             roughness={0.3}
             clearcoat={1}
-            clearcoatRoughness={0.18}
-            envMapIntensity={1.15}
+            clearcoatRoughness={0.2}
+            envMapIntensity={1.25}
           />
         </mesh>
         {/* dark glasshouse (carbon-roof CS look) */}
@@ -277,29 +284,37 @@ function DriftCar() {
           />
         </mesh>
 
-        {/* kidney grilles */}
-        {[0.19, -0.19].map((z) => (
-          <mesh key={z} position={[2.09, 0.42, z]} rotation-y={z > 0 ? -0.1 : 0.1}>
-            <boxGeometry args={[0.05, 0.2, 0.3]} />
-            <meshStandardMaterial color="#08090b" metalness={0.6} roughness={0.45} />
-          </mesh>
+        {/* big gloss-black kidneys with mesh slats */}
+        {[0.2, -0.2].map((z) => (
+          <group key={z} position={[2.07, 0.42, z]} rotation-y={z > 0 ? -0.16 : 0.16}>
+            <mesh>
+              <boxGeometry args={[0.05, 0.26, 0.36]} />
+              <meshStandardMaterial color="#060708" metalness={0.5} roughness={0.5} />
+            </mesh>
+            {[0.08, 0, -0.08].map((sy) => (
+              <mesh key={sy} position={[0.025, sy, 0]}>
+                <boxGeometry args={[0.02, 0.028, 0.3]} />
+                <meshStandardMaterial color="#2a2d33" metalness={0.7} roughness={0.4} />
+              </mesh>
+            ))}
+          </group>
         ))}
 
-        {/* yellow CS daylight running lights + glow */}
+        {/* angular white LED headlights + cool glow */}
         {[0.6, -0.6].map((z) => (
           <group key={z}>
-            <mesh position={[1.82, 0.62, z]} rotation-y={z > 0 ? -0.35 : 0.35}>
-              <boxGeometry args={[0.12, 0.08, 0.3]} />
-              <meshStandardMaterial color="#1a1608" emissive="#ffcf4d" emissiveIntensity={3.2} />
+            <mesh position={[1.84, 0.58, z]} rotation-y={z > 0 ? -0.42 : 0.42}>
+              <boxGeometry args={[0.1, 0.055, 0.34]} />
+              <meshStandardMaterial color="#0a0d14" emissive="#cfe0ff" emissiveIntensity={2.4} />
             </mesh>
-            <Billboard position={[1.95, 0.62, z]}>
+            <Billboard position={[1.97, 0.58, z]}>
               <mesh>
-                <planeGeometry args={[0.55, 0.55]} />
+                <planeGeometry args={[0.5, 0.5]} />
                 <meshBasicMaterial
                   map={makeSoftCircleTexture()}
-                  color="#ffc63e"
+                  color="#bcd2ff"
                   transparent
-                  opacity={0.4}
+                  opacity={0.32}
                   blending={THREE.AdditiveBlending}
                   depthWrite={false}
                 />
@@ -313,16 +328,16 @@ function DriftCar() {
           <group key={z}>
             <mesh position={[-2.08, 0.6, z]}>
               <boxGeometry args={[0.05, 0.07, 0.52]} />
-              <meshStandardMaterial color="#1a0505" emissive="#ff2d2d" emissiveIntensity={2.4} />
+              <meshStandardMaterial color="#160404" emissive="#e02626" emissiveIntensity={1.9} />
             </mesh>
             <Billboard position={[-2.16, 0.6, z]}>
               <mesh>
                 <planeGeometry args={[0.5, 0.5]} />
                 <meshBasicMaterial
                   map={makeSoftCircleTexture()}
-                  color="#ff4040"
+                  color="#ff4d4d"
                   transparent
-                  opacity={0.3}
+                  opacity={0.22}
                   blending={THREE.AdditiveBlending}
                   depthWrite={false}
                 />
@@ -335,14 +350,26 @@ function DriftCar() {
         {[1.0, -1.0].map((z) => (
           <mesh key={z} position={[0.42, 0.88, z]}>
             <boxGeometry args={[0.12, 0.07, 0.16]} />
-            <meshStandardMaterial color="#767b82" metalness={0.75} roughness={0.3} />
+            <meshStandardMaterial color="#101114" metalness={0.6} roughness={0.25} />
           </mesh>
         ))}
 
         {/* front splitter + rear diffuser */}
-        <mesh position={[1.98, 0.12, 0]}>
-          <boxGeometry args={[0.34, 0.05, 1.9]} />
-          <meshStandardMaterial color="#0b0c0e" metalness={0.4} roughness={0.6} />
+        <mesh position={[2.02, 0.1, 0]}>
+          <boxGeometry args={[0.44, 0.05, 1.94]} />
+          <meshStandardMaterial color="#0b0c0e" metalness={0.4} roughness={0.5} />
+        </mesh>
+        {/* gloss black side skirts */}
+        {[0.965, -0.965].map((z) => (
+          <mesh key={z} position={[0, 0.16, z]}>
+            <boxGeometry args={[2.45, 0.06, 0.06]} />
+            <meshStandardMaterial color="#0c0d0f" metalness={0.5} roughness={0.45} />
+          </mesh>
+        ))}
+        {/* shark fin antenna */}
+        <mesh position={[-1.02, 1.17, 0]}>
+          <boxGeometry args={[0.26, 0.06, 0.07]} />
+          <meshStandardMaterial color="#0c0d0f" metalness={0.5} roughness={0.4} />
         </mesh>
         <mesh position={[-1.98, 0.14, 0]}>
           <boxGeometry args={[0.3, 0.08, 1.7]} />
@@ -551,19 +578,18 @@ function Rig() {
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 0.05)
     const t = state.clock.elapsedTime
-    // helicopter-style chase: keeps a constant distance to the car so the
-    // framing stays consistent while the donut and smoke rotate past
-    const angle = 1.2 + t * 0.07
-    const distance = 7.4
+    // Chase the car from its rear-3/4 quadrant (the hero angle) — the
+    // bearing follows the car's yaw and slowly swings side to side for
+    // variety, so the framing always flatters the drift.
+    const bearing = carChannel.yaw + Math.PI + Math.sin(t * 0.06) * 0.7
+    const distance = 8.6
     target.set(
-      carChannel.center.x + Math.cos(angle) * distance + state.pointer.x * 0.9,
-      3.1 + state.pointer.y * 0.4,
-      carChannel.center.z + Math.sin(angle) * distance + state.pointer.y * 0.3
+      carChannel.center.x + Math.cos(bearing) * distance + state.pointer.x * 0.9,
+      2.6 + state.pointer.y * 0.4,
+      carChannel.center.z - Math.sin(bearing) * distance + state.pointer.y * 0.3
     )
-    state.camera.position.lerp(target, 1 - Math.pow(0.004, dt))
-    // aim just below the car so it sits slightly above screen center,
-    // clear of the hero copy at the bottom
-    lookAt.set(carChannel.center.x * 0.88, 0.15, carChannel.center.z * 0.88)
+    state.camera.position.lerp(target, 1 - Math.pow(0.002, dt))
+    lookAt.set(carChannel.center.x * 0.85, 0.5, carChannel.center.z * 0.85)
     state.camera.lookAt(lookAt)
   })
   return null
@@ -575,9 +601,10 @@ export default function BmwDriftScene() {
     <div className="absolute inset-0" aria-hidden="true">
       <Canvas
         dpr={[1, 1.75]}
-        camera={{ position: [7.88, 3.1, 6.9], fov: 40, near: 0.1, far: 160 }}
+        camera={{ position: [9.0, 2.0, -7.0], fov: 40, near: 0.1, far: 160 }}
         gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
       >
+        <color attach="background" args={['#0d1017']} />
         <fogExp2 attach="fog" args={['#0d1017', 0.045]} />
         <ambientLight intensity={0.4} />
         <directionalLight position={[7, 11, 5]} intensity={1.45} color="#fff3e2" />
