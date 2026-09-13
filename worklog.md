@@ -176,3 +176,25 @@ Stage Summary:
 - The 3D stage is now a real-world lakeside night set: 360° photo backdrop = IBL, invisible shadow-catcher floor, night-graded lights, tuned scrub choreography — all keyframe/rotation constants documented in-file (KEYS block + ENV_ROTATION_Y/BACKDROP_PITCH_X).
 - Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-bn49qtih2-…).
 - Known note: first load streams the 13 MB glTF — the car pops in after parse (fallback gradient/clear color shows the panorama immediately); subsequent loads are instant (cached).
+
+---
+Task ID: 7
+Agent: Z.ai Code (main agent)
+Task: Revert the environment direction per user correction — replace the lakeside night panorama with the user's 360° equirectangular STUDIO panorama ('studio_360.jpg') as scene.background + scene.environment, restore ShadowMaterial opacity 0.4, retune the scroll camera sequence (low-angle hero → front bumper zoom → rear diffuser orbit), scrub 1.2, 300vh track, mobile FOV on resize.
+
+Work Log:
+- Identified the correct upload: Gemini_Generated_Image_q2yuwoq2yuwoq2yu.jpg (2912×1440 ≈ 2:1 equirect; the sm41dq… file was the flat perspective reference). sharp → exact 2:1 `public/textures/studio_360.jpg` (2048×1024, 182 KB); removed the now-unused `public/environment/night_city_lake_360.jpg`.
+- `src/components/scroll-experience.tsx` — studio integration (ENV_URL swap + rename lakeTex→studioTex, lakeEnvRT→studioEnvRT):
+  - ONE TextureLoader panorama → scene.background (EquirectangularReflectionMapping, SRGB, anisotropy 8) AND scene.environment via PMREMGenerator.fromEquirectangular → paint reflects the real softbox/walls; ACESFilmicToneMapping exposure 1.15 → 1.05 (softbox whites short of clipping); fallback clear 0x0a0b0d.
+  - Rotations: ENV_ROTATION_Y 0 (softbox centered +X), BACKDROP_PITCH_X −0.25 → +0.1 after visual tuning (negative pulled the ceiling into frame; positive plants the photo floor at y=0 and keeps the softbox peeking at the top).
+  - Lights regraded from night to studio: key SpotLight 0xdfe9ff@340 (3,14,4) → 0xf5f8ff@190 overhead (0.4, 9, 1.2) wide-angle/penumbra 0.9 — shadow pools straight under the tires; rim 0x9fc0ee 2.4 → 0xe8edf4 1.1 neutral fill; hemisphere 0.5 night → 0.5 neutral 0x3d434b/0x131518.
+  - Floor: ShadowMaterial opacity 0.55 → 0.4, radius 90 → 60 (photo concrete is the visible floor).
+  - Paint retuned for the dark-walled studio: metalness 0.82 → 0.7, envMapIntensity 1.25 → 1.55 (glass 1.3 → 1.5, trims 0.7 → 0.9) — car was otherwise near-invisible reflecting black cyc walls.
+  - Camera KEYS retuned: hero (-6.1,1.5,4.3) → LOW (-6.0,0.78,4.7)→(0,0.78,0); front (4.4,0.5,2.1) → tighter (3.55,0.52,1.5)→(2.1,0.5,0.05); rear (-4.3,0.9,2.2) → (-3.95,0.66,1.75)→(-2.0,0.58,0); outro (-6.9,3.1,7.2) → (-6.6,2.6,6.8)→(0,1.0,0). scrub already 1.2; scroll track 440vh → 300vh per spec.
+  - Removed night-only garnish: STAR_DOTS overlay + starDotStyle + CSSProperties import (stars make no sense indoors); captions updated (softbox / studio key light); aria-label → studio inspection.
+- Verified: lint 0/0; agent-browser desktop 1440×900 full sequence (hero low-angle drift → front close-up with Laserlight/kidneys → rear 3/4 diffuser+quad+smoke → outro end card → full reverse rewind restoring hero); mobile 390×844 (FOV 60 + mobileF, head-on front crop); zero console/page errors; first-load note: 13 MB glTF parse leaves ~8 s of panorama-only view before the car pops in.
+- Deployed: `vercel deploy --prod` → aliased https://bmw-m5-cs-vert.vercel.app; live /textures/studio_360.jpg 200 (185,776 B); live screenshots confirm studio hero + front close-up with car; zero page errors.
+
+Stage Summary:
+- The 3D stage is now a photographic light studio: 360° softbox panorama drives both backdrop and IBL, invisible 0.4 shadow-catcher floor, studio-graded lights, low-angle→front→rear scrub choreography on a 300vh track — every tweakable (KEYS, ENV_ROTATION_Y, BACKDROP_PITCH_X, FOV_*, exposure) documented in-file.
+- Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-lkxz58sfz-…).
