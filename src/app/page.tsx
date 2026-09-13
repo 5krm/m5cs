@@ -1,9 +1,13 @@
 'use client'
 
-import { useEffect, useRef, type CSSProperties } from 'react'
+import dynamic from 'next/dynamic'
+import type { CSSProperties } from 'react'
 
-const VIDEO_URL =
-  'https://cdn.sceneai.art/Hero%20section%20video%20file%20(2)/1aafa16f-30a9-48c5-8964-78cffbad914e.mp4'
+// WebGL scene — client-only, gradient fallback shows while it loads
+const BmwDriftScene = dynamic(() => import('@/components/bmw-drift-scene'), {
+  ssr: false,
+  loading: () => null,
+})
 
 const NAV_LINKS = ['How It Works', 'Tributes', 'Pricing', 'Support'] as const
 
@@ -37,43 +41,12 @@ function starDotStyle(dot: StarDot): CSSProperties {
 }
 
 export default function Home() {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    // Guarantee the video always starts and never stops.
-    // autoplay + muted + playsinline lets browsers start it with zero user
-    // interaction; loop makes it repeat endlessly; the pause listener
-    // re-plays it if anything ever pauses it.
-    video.muted = true
-    video.src = VIDEO_URL
-    video.play().catch(() => {})
-
-    const resume = () => {
-      video.play().catch(() => {})
-    }
-    video.addEventListener('pause', resume)
-    return () => video.removeEventListener('pause', resume)
-  }, [])
-
   return (
     <main className="hero-shell relative flex w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#0d1017_0%,#141826_45%,#1c2233_100%)] text-[#f2efe7]">
-      {/* Background video — no controls, no permission prompt, loops forever */}
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="none"
-        aria-hidden="true"
-        tabIndex={-1}
-        className="absolute inset-0 h-full w-full object-cover"
-      />
+      {/* 3D background — gray BMW M5 CS drifting donuts with tire smoke */}
+      <BmwDriftScene />
 
-      {/* Overlays — darken the bottom only, the top of the video stays clear */}
+      {/* Overlays — darken the bottom only, the top stays clear */}
       <div aria-hidden="true" className="overlay-fade pointer-events-none absolute inset-0" />
       <div aria-hidden="true" className="overlay-vignette pointer-events-none absolute inset-0" />
       <div
