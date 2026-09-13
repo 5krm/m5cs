@@ -97,12 +97,12 @@ a:hover {
   color: #f5edd8;
 }
 
-/* ── Page reset / base (NeuroLink memorial) ─────────────────────────── */
+/* ── Page reset / base (BMW M5 CS showcase) ─────────────────────────── */
 html {
   color-scheme: dark;
 }
 
-/* ── Sign In — glassy pill ──────────────────────────────────────────── */
+/* ── Book a Drive — glassy pill ─────────────────────────────────────── */
 .signin-btn {
   padding: 10px 26px;
   border-radius: 999px;

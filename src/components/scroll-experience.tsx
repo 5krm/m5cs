@@ -380,7 +380,7 @@ function flattenKey(k: CamKey, mobile: boolean): FlatKey {
  * Overlay UI data (copied verbatim from the approved hero design)
  * ══════════════════════════════════════════════════════════════════════ */
 
-const NAV_LINKS = ['How It Works', 'Tributes', 'Pricing', 'Support'] as const
+const NAV_LINKS = ['Overview', 'Performance', 'Design', 'Specs'] as const
 
 type StarDot = {
   top: string
@@ -746,7 +746,7 @@ export default function ScrollExperience() {
       <div className="pointer-events-none fixed inset-0 z-10">
         {/* ── Navbar (persists through the whole sequence) ── */}
         <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-4 px-[clamp(20px,5.5vw,80px)] py-[clamp(16px,3vw,32px)]">
-          <a href="#" aria-label="NeuroLink — home" className="text-[#f5f2ea] hover:text-[#f5f2ea]">
+          <a href="#" aria-label="BMW M5 CS — home" className="text-[#f5f2ea] hover:text-[#f5f2ea]">
             <svg
               width="129"
               height="36"
@@ -756,16 +756,36 @@ export default function ScrollExperience() {
               aria-hidden="true"
               focusable="false"
             >
-              <path
-                fillRule="evenodd"
-                clipRule="evenodd"
-                d="M31.949 14.4493C36.3622 19.7088 35.7552 27.386 30.7224 31.609C28.6651 33.3352 26.1803 34.2304 23.6536 34.332C22.8012 34.3662 22.1381 35.085 22.1724 35.9373C22.2065 36.7897 22.9253 37.4529 23.7777 37.4186C26.956 37.2909 30.1034 36.1609 32.708 33.9754C39.1103 28.6033 39.7721 18.9667 34.3154 12.4637C28.8588 5.96073 19.2537 4.93901 12.8514 10.3112C10.2468 12.4967 8.58745 15.4 7.90978 18.508C7.72799 19.3414 8.25624 20.1644 9.0898 20.3461C9.92324 20.5279 10.7462 19.9996 10.9279 19.1661C11.4667 16.6954 12.7798 14.4038 14.837 12.6776C19.8698 8.45456 27.5358 9.18983 31.949 14.4493ZM25.3365 25.6158C26.9702 24.245 27.1833 21.8093 25.8125 20.1756C24.4416 18.542 22.006 18.3289 20.3723 19.6997C18.7387 21.0705 18.5256 23.5062 19.8964 25.1398C21.2672 26.7735 23.7028 26.9866 25.3365 25.6158ZM26.6852 27.2503C29.2017 25.3016 29.6692 21.5171 27.5433 18.7718C25.4175 16.0264 21.6364 15.5317 19.1199 17.4803C17.957 18.3809 17.2378 19.6567 17.0014 21.0484C17.0051 21.1214 17.0037 21.1955 16.9969 21.2704C16.9189 22.1198 16.1671 22.7453 15.3177 22.6673C13.8978 22.5371 12.4666 22.9126 11.2925 23.8218C8.77601 25.7704 8.30857 29.5549 10.4344 32.3003C12.5603 35.0456 16.3413 35.5403 18.8578 33.5917C20.0208 32.6912 20.74 31.4153 20.9763 30.0236C20.9726 29.9506 20.974 29.8765 20.9809 29.8017C21.0588 28.9522 21.8106 28.3267 22.66 28.4047C24.0799 28.535 25.5111 28.1594 26.6852 27.2503ZM23.8052 31.4988C25.4883 31.3861 27.1509 30.7967 28.5766 29.6927C32.535 26.6275 33.0827 20.8798 29.9858 16.8804C26.8889 12.8811 21.1871 11.9726 17.2286 15.0378C15.6945 16.2258 14.6685 17.8285 14.1726 19.5733C12.4894 19.6859 10.8268 20.2754 9.40117 21.3793C5.44273 24.4445 4.89505 30.1922 7.99195 34.1916C11.0888 38.1909 16.7907 39.0994 20.7491 36.0342C22.2832 34.8463 23.3093 33.2435 23.8052 31.4988Z"
+              {/* BMW roundel */}
+              <circle cx="22.5" cy="22.5" r="21.5" fill="#0b0d10" />
+              <circle cx="22.5" cy="22.5" r="21.25" stroke="rgba(255,255,255,0.35)" strokeWidth="0.5" />
+              <circle cx="22.5" cy="22.5" r="15.2" fill="#f2f4f6" />
+              <path d="M22.5 7.3A15.2 15.2 0 0 0 7.3 22.5L22.5 22.5Z" fill="#1C69D4" />
+              <path d="M37.7 22.5A15.2 15.2 0 0 1 22.5 37.7L22.5 22.5Z" fill="#1C69D4" />
+              <defs>
+                <path id="bmw-arc" d="M11.2 11.2A16 16 0 0 1 33.8 11.2" fill="none" />
+              </defs>
+              <text fontSize="5.2" fontWeight="700" fill="#f5f2ea" letterSpacing="2">
+                <textPath href="#bmw-arc" startOffset="50%" textAnchor="middle">
+                  BMW
+                </textPath>
+              </text>
+              {/* M tricolor stripes */}
+              <path d="M51 12.5L56.5 12.5L49 32.5L43.5 32.5Z" fill="#009ADA" />
+              <path d="M61.5 12.5L67 12.5L59.5 32.5L54 32.5Z" fill="#2B3990" />
+              <path d="M72 12.5L77.5 12.5L70 32.5L64.5 32.5Z" fill="#E4002B" />
+              {/* M5 CS wordmark */}
+              <text
+                x="84"
+                y="31"
+                fontSize="21"
+                fontWeight="800"
+                fontStyle="italic"
+                letterSpacing="0.5"
                 fill="currentColor"
-              />
-              <path
-                d="M53.4883 31.3584V14.4482H56.207L64.4453 26.2959H64.5156V14.4482H67.5156V31.3584H64.8203L56.5586 19.4639H56.5V31.3584H53.4883ZM75.6719 31.6045C71.9453 31.6045 69.6953 29.1318 69.6953 25.1826V25.1709C69.6953 21.2568 71.9805 18.6787 75.5312 18.6787C79.082 18.6787 81.2852 21.1748 81.2852 24.9248V25.8623H72.5898C72.6367 28.042 73.832 29.3311 75.7305 29.3311C77.1836 29.3311 78.1328 28.5576 78.4141 27.7256L78.4375 27.6436H81.168L81.1328 27.7725C80.7461 29.6826 78.918 31.6045 75.6719 31.6045ZM75.5664 20.9639C74.0195 20.9639 72.8594 22.0068 72.625 23.917H78.4492C78.2383 21.9482 77.1133 20.9639 75.5664 20.9639ZM87.4023 31.6045C84.6719 31.6045 83.1133 29.8467 83.1133 26.9639V18.9365H86.0312V26.3896C86.0312 28.1475 86.8516 29.1436 88.5156 29.1436C90.1914 29.1436 91.2578 27.9365 91.2578 26.1318V18.9365H94.1758V31.3584H91.2578V29.4131H91.1992C90.5547 30.7373 89.2773 31.6045 87.4023 31.6045ZM96.5781 31.3584V18.9365H99.4961V21.0811H99.5547C99.9414 19.5811 100.973 18.6787 102.402 18.6787C102.766 18.6787 103.105 18.7373 103.328 18.7959V21.4326C103.082 21.3389 102.637 21.2686 102.145 21.2686C100.492 21.2686 99.4961 22.3115 99.4961 24.1514V31.3584H96.5781ZM109.855 31.6045C106.199 31.6045 103.844 29.167 103.844 25.1475V25.124C103.844 21.1396 106.234 18.6787 109.844 18.6787C113.465 18.6787 115.867 21.1162 115.867 25.124V25.1475C115.867 29.1787 113.5 31.6045 109.855 31.6045ZM109.867 29.249C111.707 29.249 112.891 27.749 112.891 25.1475V25.124C112.891 22.5342 111.695 21.0459 109.844 21.0459C108.027 21.0459 106.82 22.5459 106.82 25.124V25.1475C106.82 27.7607 108.004 29.249 109.867 29.249ZM118.035 31.3584V14.4482H121.059V28.8154H128.734V31.3584H118.035ZM132.156 17.1553C131.242 17.1553 130.527 16.4287 130.527 15.5615C130.527 14.6709 131.242 13.9561 132.156 13.9561C133.07 13.9561 133.773 14.6709 133.773 15.5615C133.773 16.4287 133.07 17.1553 132.156 17.1553ZM130.691 31.3584V18.9365H133.609V31.3584H130.691ZM136.094 31.3584V18.9365H139.012V20.8818H139.07C139.715 19.5459 140.98 18.6787 142.867 18.6787C145.598 18.6787 147.156 20.4365 147.156 23.3193V31.3584H144.238V23.9053C144.238 22.1357 143.418 21.1396 141.754 21.1396C140.078 21.1396 139.012 22.3584 139.012 24.1514V31.3584H136.094ZM149.629 31.3584V14.4482H152.547V24.0928H152.605L157.246 18.9365H160.621L155.699 24.2803L160.82 31.3584H157.457L153.531 26.0146L152.547 27.0459V31.3584H149.629Z"
-                fill="currentColor"
-              />
+              >
+                M5 CS
+              </text>
             </svg>
           </a>
 
@@ -780,7 +800,7 @@ export default function ScrollExperience() {
               </a>
             ))}
             <a href="#" className="signin-btn">
-              Sign In
+              Book a Drive
             </a>
           </nav>
         </header>
@@ -804,17 +824,17 @@ export default function ScrollExperience() {
             </div>
 
             <h1 className="m-0 mb-5 whitespace-nowrap text-[clamp(22px,5.5vw,44px)] font-semibold leading-[1.12] tracking-[-0.02em] text-[#f7f4ec]">
-              Where Memories <span className="text-white">Live Forever</span>
+              Engineered for <span className="text-white">the Apex</span>
             </h1>
 
             <p className="m-0 mb-9 text-[15px] font-normal leading-[1.7] text-white/75">
-              Create a beautiful memorial to share their story, photos, cherished{' '}
+              The most powerful BMW 5 Series of all time — a 627 hp twin-turbo V8{' '}
               <br className="hidden sm:inline" aria-hidden="true" />
-              moments, and celebrate their life together.
+              stripped of 70 kg and sharpened on the Nürburgring.
             </p>
 
             <a href="#" className="cta-btn pointer-events-auto">
-              Create Memorial
+              Explore the M5 CS
               <svg
                 width="18"
                 height="18"
@@ -870,12 +890,12 @@ export default function ScrollExperience() {
           style={{ opacity: 0 }}
           className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center"
         >
-          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.4em] text-[#e8ddc4]/80">NeuroLink</p>
+          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.4em] text-[#e8ddc4]/80">BMW M5 CS</p>
           <h2 className="m-0 mt-4 text-[clamp(24px,4.5vw,40px)] font-semibold tracking-[-0.02em] text-[#f7f4ec]">
-            Every angle. Remembered forever.
+            The most powerful M5 ever built.
           </h2>
           <a href="#" className="cta-btn pointer-events-auto mt-8">
-            Create Memorial
+            Reserve Yours
             <svg
               width="18"
               height="18"

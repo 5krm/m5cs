@@ -108,3 +108,24 @@ Stage Summary:
 - Camera coordinates/targets live in one commented `KEYS` block for trivial retuning to any future model; smoke/sway/drift garnish each has a named on/off constant.
 - All prior NeuroLink hero elements preserved (nav, star dots, headline, CTA, license credit); superseded R3F drift scene deleted.
 - Headless-GPU caveats: model parse takes ~5s under SwiftShader (sub-second on real GPUs) and screenshots can catch mid-scrub poses if taken <1.5s after a scroll jump; both are environment artifacts, not product issues.
+
+---
+Task ID: 4
+Agent: Z.ai Code (main agent)
+Task: Rebrand the entire site from "NeuroLink" (memorial) to "BMW M5 CS" (name, logo, content), then deploy to production on Vercel.
+
+Work Log:
+- Located all remaining NeuroLink branding (3D scene already BMW-themed from Task 3; only overlay UI + metadata still NeuroLink).
+- Replaced the 129×36 NeuroLink wordmark SVG with a BMW M5 CS lockup: hand-built roundel (black ring, arc-aligned "BMW" letters via SVG textPath, blue/white quadrants), M tricolor stripes (#009ADA / #2B3990 / #E4002B), italic-800 "M5 CS" wordmark inheriting currentColor.
+- Rewrote overlay copy: nav links → Overview · Performance · Design · Specs; "Sign In" pill → "Book a Drive"; H1 → "Engineered for the Apex" (white span "the Apex"); subcopy → 627 hp twin-turbo V8 / −70 kg / Nürburgring spec lines; hero CTA → "Explore the M5 CS"; closing card → kicker "BMW M5 CS", headline "The most powerful M5 ever built.", CTA "Reserve Yours". Stage captions (Laserlight & Kidney Grille / Diffuser & Quad Exhaust) were already BMW-correct.
+- Rewrote layout.tsx metadata: title "BMW M5 CS — Engineered for the Apex", new description/keywords/OpenGraph (siteName "BMW M5 CS"); removed CDN icon in favor of new `src/app/icon.svg` BMW roundel favicon (App Router file convention).
+- Renamed package.json name → "bmw-m5-cs" (used as the Vercel project name); refreshed two stale CSS comments.
+- Fixed a self-inflicted broken JSX (logo swap script consumed the old `</svg>`) — caught immediately by lint (parsing error) and repaired.
+- Verification: eslint 0/0; local dev 200; agent-browser desktop 1440×900 (hero + full scroll to closing card + reverse rewind restoring hero at opacity 1) and mobile 390×844 (no overflow, 390=390); fresh-load console 100% clean.
+- Deployed to Vercel: token validated (`whoami` → 8krm), `vercel link` → project bmw-m5-cs (hobby), `vercel deploy --prod` → build completed in 37s, Ready in 1m.
+- Live checks: production URL HTTP 200, correct <title>, /models/bmw-m5-cs/scene.gltf 200, /icon.svg 200, live screenshot renders hero + 3D car with zero page errors.
+
+Stage Summary:
+- Site is now fully "BMW M5 CS": logo (roundel + M stripes + M5 CS), nav, hero copy, CTAs, closing card, metadata and favicon all rebranded; 3D scroll experience unchanged.
+- Production: https://bmw-m5-cs-vert.vercel.app (alias) — deployment bmw-m5-5zjt5jevy-akrmsalah79-5807s-projects.vercel.app.
+- Vercel project "bmw-m5-cs" linked in .vercel/project.json; redeploy anytime with `bunx vercel deploy --prod --token <token>`.
