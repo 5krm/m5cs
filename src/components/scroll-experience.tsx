@@ -121,7 +121,7 @@ const KEYS = {
    *  66° lens at d ≈ 4.9 keeps the whole nose + the silo/water district in
    *  frame (the old 45° bumper-zoom cropped the city out entirely).
    *  ✏️ pos[2] (z): bigger → more flank visible, smaller → head-on nose. */
-  front: { pos: [5.0, 2.3, 3.85], target: [1.55, 0.45, 0.3], mobileF: 2.0, mobileHeadOn: 0.55, fov: 66 },
+  front: { pos: [5.0, 2.6, 3.85], target: [1.55, 0.42, 0.3], mobileF: 2.0, mobileHeadOn: 0.55, fov: 66 },
   /** state 1.5 — invisible WAYPOINTS that arc the camera around the nose
    *  and the right-rear corner. Without them the front→rear tween would
    *  drive the camera straight THROUGH the body. Wide lenses keep the city
@@ -146,30 +146,32 @@ const KEYS = {
 const FOV_DESKTOP = 45
 const FOV_MOBILE = 60
 
-/* ═════ 3. PRESENTATION GARNISH (drift pose / sway / smoke) ═══════════ */
+/* ═════ 3. PRESENTATION — fully parked, zero drift garnish ═══════════ */
 
-const BASE_YAW = -0.14 // parked "drift" angle of the car (rad)
-const IDLE_SWAY = true // subtle breathing sway so the car feels alive
-const SMOKE_ENABLED = true // rear-tire smoke puffs
-const SMOKE_PER_SECOND = 105 // thin night haze — heavy smoke floods the close-ups
-const SMOKE_COUNT = 240
+const BASE_YAW = -0.14 // parked angle of the car (rad) — no sway, no smoke:
+// a parked car must sit DEAD STILL on its contact patch or the micro-bob
+// reads as "floating / just hit something" (user-reported).
 
 /* ══════════════════════════════════════════════════════════════════════
  * Canvas-generated textures — zero network dependencies
  * ══════════════════════════════════════════════════════════════════════ */
 
-/** Soft radial sprite used by the smoke particles and light glows */
-function makeSoftCircleTexture(): THREE.CanvasTexture {
+/** Dark radial blob painted under the car — a fake ambient-occlusion
+ *  contact patch. The photo asphalt under the car is often near-black, so
+ *  the real cast shadow alone gives no grounding cue; this soft dark
+ *  ellipse (which yaws with the car) anchors the wheels to the ground
+ *  without reading as a podium (edges fade to fully transparent). */
+function makeContactShadowTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 128
+  canvas.width = canvas.height = 256
   const ctx = canvas.getContext('2d')!
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
-  g.addColorStop(0, 'rgba(255,255,255,0.7)')
-  g.addColorStop(0.25, 'rgba(255,255,255,0.45)')
-  g.addColorStop(0.6, 'rgba(255,255,255,0.14)')
-  g.addColorStop(1, 'rgba(255,255,255,0)')
+  const g = ctx.createRadialGradient(128, 128, 10, 128, 128, 128)
+  g.addColorStop(0, 'rgba(0,0,0,0.62)')
+  g.addColorStop(0.5, 'rgba(0,0,0,0.34)')
+  g.addColorStop(0.8, 'rgba(0,0,0,0.1)')
+  g.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = g
-  ctx.fillRect(0, 0, 128, 128)
+  ctx.fillRect(0, 0, 256, 256)
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -208,8 +210,6 @@ const darkGlass = () =>
 
 type CarRig = {
   car: THREE.Group
-  anchorLeft: THREE.Object3D // rear tire contact patches (smoke emitters)
-  anchorRight: THREE.Object3D
 }
 
 /**
@@ -260,146 +260,7 @@ function buildCarRig(source: THREE.Object3D): CarRig {
   const car = new THREE.Group()
   car.add(model)
 
-  // Smoke anchors at the rear tire contact patches (rear = −X)
-  const anchorLeft = new THREE.Object3D()
-  anchorLeft.position.set(-TARGET_LENGTH * 0.3, 0.16, TARGET_LENGTH * 0.155)
-  const anchorRight = new THREE.Object3D()
-  anchorRight.position.set(-TARGET_LENGTH * 0.3, 0.16, -TARGET_LENGTH * 0.155)
-  car.add(anchorLeft, anchorRight)
-
-  return { car, anchorLeft, anchorRight }
-}
-
-/* ══════════════════════════════════════════════════════════════════════
- * Tire smoke — pooled CPU particles + point-sprite shader
- * ══════════════════════════════════════════════════════════════════════ */
-
-const SMOKE_VERTEX = /* glsl */ `
-  attribute float aSize;
-  attribute float aAlpha;
-  uniform float uScale;
-  varying float vAlpha;
-  void main() {
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    float dist = max(0.1, -mv.z);
-    // cap the sprite size and fade puffs that get right next to the
-    // camera (close-up states park the lens near the rear wheels)
-    gl_PointSize = min(aSize * uScale / dist, 190.0);
-    vAlpha = aAlpha * smoothstep(0.7, 2.2, dist);
-    gl_Position = projectionMatrix * mv;
-  }
-`
-
-const SMOKE_FRAGMENT = /* glsl */ `
-  uniform sampler2D uMap;
-  varying float vAlpha;
-  void main() {
-    float a = texture2D(uMap, gl_PointCoord).a * vAlpha * 0.7; // night-subtle
-    if (a < 0.004) discard;
-    gl_FragColor = vec4(0.84, 0.86, 0.9, a);
-  }
-`
-
-type SmokeParticle = {
-  life: number
-  maxLife: number
-  x: number
-  y: number
-  z: number
-  vx: number
-  vy: number
-  vz: number
-  size: number
-}
-
-function createSmokeSystem(softTex: THREE.Texture) {
-  const particles: SmokeParticle[] = Array.from({ length: SMOKE_COUNT }, () => ({
-    life: 0,
-    maxLife: 1,
-    x: 0,
-    y: -50,
-    z: 0,
-    vx: 0,
-    vy: 0,
-    vz: 0,
-    size: 1,
-  }))
-  const position = new Float32Array(SMOKE_COUNT * 3)
-  const aSize = new Float32Array(SMOKE_COUNT)
-  const aAlpha = new Float32Array(SMOKE_COUNT)
-  const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.BufferAttribute(position, 3))
-  geometry.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1))
-  geometry.setAttribute('aAlpha', new THREE.BufferAttribute(aAlpha, 1))
-
-  const material = new THREE.ShaderMaterial({
-    uniforms: { uScale: { value: 600 }, uMap: { value: softTex } },
-    vertexShader: SMOKE_VERTEX,
-    fragmentShader: SMOKE_FRAGMENT,
-    transparent: true,
-    depthWrite: false,
-  })
-
-  const points = new THREE.Points(geometry, material)
-  points.frustumCulled = false
-  points.renderOrder = 5
-
-  const state = { cursor: 0, spawnAcc: 0 }
-
-  /** dt seconds · emitters are the two rear-tire anchor world positions */
-  function update(dt: number, left: THREE.Vector3, right: THREE.Vector3, spawn: boolean) {
-    state.spawnAcc += dt * (spawn ? SMOKE_PER_SECOND : 0)
-    while (state.spawnAcc >= 1) {
-      state.spawnAcc -= 1
-      state.cursor = (state.cursor + 1) % SMOKE_COUNT
-      const p = particles[state.cursor]
-      const src = state.cursor % 2 === 0 ? left : right
-      p.life = 0.0001
-      p.maxLife = 1.8 + Math.random() * 1.0
-      p.x = src.x + (Math.random() - 0.5) * 0.24
-      p.y = 0.12 + Math.random() * 0.08
-      p.z = src.z + (Math.random() - 0.5) * 0.24
-      // drift backwards (−X) and outward away from the centerline
-      p.vx = -(0.5 + Math.random() * 0.7)
-      p.vz = Math.sign(src.z || 1) * (0.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.5
-      p.vy = 0.18 + Math.random() * 0.3
-      p.size = 0.35 + Math.random() * 0.3
-    }
-
-    for (let i = 0; i < SMOKE_COUNT; i++) {
-      const p = particles[i]
-      if (p.life > 0) {
-        p.life += dt
-        if (p.life >= p.maxLife) {
-          p.life = 0
-        } else {
-          const drag = Math.exp(-1.1 * dt)
-          p.vx *= drag
-          p.vz *= drag
-          p.vy = p.vy * Math.exp(-0.7 * dt) + 0.14 * dt
-          p.x += p.vx * dt
-          p.y += p.vy * dt
-          p.z += p.vz * dt
-        }
-      }
-      const t = p.life > 0 ? p.life / p.maxLife : 0
-      position[i * 3] = p.x
-      position[i * 3 + 1] = p.life > 0 ? p.y : -50
-      position[i * 3 + 2] = p.z
-      aSize[i] = p.size + t * 2.0
-      aAlpha[i] = p.life > 0 ? Math.min(t * 6, 1) * Math.pow(1 - t, 1.1) * 0.4 : 0
-    }
-    geometry.attributes.position.needsUpdate = true
-    geometry.attributes.aSize.needsUpdate = true
-    geometry.attributes.aAlpha.needsUpdate = true
-  }
-
-  function dispose() {
-    geometry.dispose()
-    material.dispose()
-  }
-
-  return { points, material, update, dispose }
+  return { car }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -573,37 +434,28 @@ export default function ScrollExperience() {
      * lower its target[1] — do NOT grow this catcher into a visible disc. */
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(7, 64),
-      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.45 }),
+      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.62 }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     scene.add(floor)
 
-    /* ── Car root + light glows (model streams in asynchronously) ──── */
+    /* ── Car root + fake-AO contact blob (model streams in async) ──── */
     const carGroup = new THREE.Group()
     carGroup.rotation.y = BASE_YAW
     scene.add(carGroup)
 
-    const softTex = makeSoftCircleTexture()
-    const addGlow = (x: number, y: number, z: number, color: number, opacity: number, size: number) => {
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: softTex,
-          color,
-          transparent: true,
-          opacity,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        }),
-      )
-      sprite.position.set(x, y, z)
-      sprite.scale.setScalar(size)
-      carGroup.add(sprite)
-    }
-    addGlow(2.08, 0.58, 0.55, 0xcfe0ff, 0.5, 0.7) // headlights — night glare
-    addGlow(2.08, 0.58, -0.55, 0xcfe0ff, 0.5, 0.7)
-    addGlow(-2.12, 0.62, 0.55, 0xff3b3b, 0.38, 0.62) // taillights
-    addGlow(-2.12, 0.62, -0.55, 0xff3b3b, 0.38, 0.62)
+    // Soft dark ellipse under the footprint (yaws with the car) — the
+    // visual anchor that kills the "car is in the air" read on dark asphalt.
+    const contactTex = makeContactShadowTexture()
+    const contact = new THREE.Mesh(
+      new THREE.PlaneGeometry(TARGET_LENGTH * 1.16, TARGET_LENGTH * 0.52),
+      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false, opacity: 0.72 }),
+    )
+    contact.rotation.x = -Math.PI / 2
+    contact.position.y = 0.012 // above the shadow catcher, below the tires
+    contact.renderOrder = 1
+    carGroup.add(contact)
 
     let carRig: CarRig | null = null
     new GLTFLoader().load(
@@ -622,19 +474,6 @@ export default function ScrollExperience() {
       },
     )
 
-    /* ── Smoke ─────────────────────────────────────────────────────── */
-    const smoke = createSmokeSystem(softTex)
-    scene.add(smoke.points)
-
-    const drawSize = new THREE.Vector2()
-    const updatePointScale = () => {
-      renderer.getDrawingBufferSize(drawSize)
-      const fovRad = (camera.fov * Math.PI) / 180
-      const s = (drawSize.y * 0.5) / Math.tan(fovRad / 2)
-      smoke.material.uniforms.uScale.value = Number.isFinite(s) ? s : 800
-    }
-    updatePointScale()
-
     /* ── Camera rig state — animated by GSAP, applied every frame ──── */
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fo: FOV_DESKTOP }
     const applyCamera = () => {
@@ -643,20 +482,6 @@ export default function ScrollExperience() {
       if (camera.fov !== cam.fo) {
         camera.fov = cam.fo // per-shot lens (tweened by GSAP)
         camera.updateProjectionMatrix()
-      }
-    }
-
-    /* ── Per-frame world updates (sway, smoke) ─────────────────────── */
-    const anchorL = new THREE.Vector3()
-    const anchorR = new THREE.Vector3()
-    const updateWorld = (t: number, dt: number) => {
-      const sway = prefersReduced || !IDLE_SWAY ? 0 : 1
-      carGroup.rotation.y = BASE_YAW + sway * Math.sin(t * 0.42) * 0.05
-      carGroup.rotation.x = sway * (Math.sin(t * 2.9) * 0.008 - 0.006)
-      carGroup.rotation.z = sway * Math.sin(t * 2.1) * 0.009
-      carGroup.position.y = sway * Math.abs(Math.sin(t * 4.7)) * 0.014
-      if (carRig && SMOKE_ENABLED && !prefersReduced) {
-        smoke.update(dt, carRig.anchorLeft.getWorldPosition(anchorL), carRig.anchorRight.getWorldPosition(anchorR), true)
       }
     }
 
@@ -729,7 +554,6 @@ export default function ScrollExperience() {
         const mobile = ctx.conditions?.isMobile === true
         camera.fov = mobile ? FOV_MOBILE : FOV_DESKTOP
         camera.updateProjectionMatrix()
-        updatePointScale()
         buildTimeline(mobile)
       },
     )
@@ -741,9 +565,8 @@ export default function ScrollExperience() {
       lenis.on('scroll', ScrollTrigger.update)
     }
 
-    const tick = (time: number, deltaMS: number) => {
+    const tick = (time: number) => {
       lenis?.raf(time * 1000)
-      updateWorld(time, Math.min(deltaMS / 1000, 0.05))
       applyCamera()
       renderer.render(scene, camera)
     }
@@ -760,7 +583,6 @@ export default function ScrollExperience() {
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h, false)
-      updatePointScale()
       window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => ScrollTrigger.refresh(), 150)
     }
@@ -775,7 +597,6 @@ export default function ScrollExperience() {
       ScrollTrigger.getAll().forEach((st) => st.kill()) // safety net
       gsap.ticker.remove(tick)
       lenis?.destroy()
-      smoke.dispose()
       scene.traverse((obj) => {
         const o = obj as THREE.Mesh
         if (o.geometry) o.geometry.dispose()
@@ -788,7 +609,7 @@ export default function ScrollExperience() {
         if (Array.isArray(m)) m.forEach(disposeMat)
         else if (m) disposeMat(m)
       })
-      softTex.dispose()
+      contactTex.dispose()
       lakeTex?.dispose()
       lakeEnvRT?.dispose()
       scene.background = null
