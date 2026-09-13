@@ -146,3 +146,33 @@ Stage Summary:
 - Navbar and favicon now use the user's official BMW roundel asset; M stripes + "M5 CS" wordmark unchanged.
 - Assets: public/bmw-roundel.png (navbar), src/app/icon.png (favicon). Old SVG roundel fully removed.
 - Production live: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-aygcigw5s-…).
+
+---
+Task ID: 6
+Agent: Z.ai Code (main agent)
+Task: Replace the indoor studio backdrop with the user's 360° equirectangular lakeside night-city panorama (background + IBL), per the "senior Three.js" spec: ACES/exposure tuning, metallic night reflections, invisible ShadowMaterial floor (opacity 0.55), and retuned scroll camera choreography (hero skyline → front glare → rear bridge), keeping Lenis + scrub 1.2 + mobile FOV handling.
+
+Work Log:
+- Optimized `upload/Gemini_Generated_Image_om63vaom63vaom63.jpg` (2912×1440, 2.5 MB) → exact 2:1 `public/environment/night_city_lake_360.jpg` (2560×1280, 228 KB) for correct equirect mapping.
+- `src/components/scroll-experience.tsx` — scene integration:
+  - Removed canvas studio backdrop, FogExp2, RoomEnvironment, glossy floor + light-pool helpers.
+  - ONE TextureLoader panorama → `scene.background` (EquirectangularReflectionMapping, SRGB, anisotropy 8) AND `scene.environment` via `PMREMGenerator.fromEquirectangular` so paint reflections match the visible photo; clear-color fallback while it streams.
+  - `scene.backgroundRotation`/`environmentRotation` kept identical: `ENV_ROTATION_Y=-0.19` (empirically calibrated: skyline behind hero, bridge behind rear, harbour behind front) + `BACKDROP_PITCH_X=0.12` (raises the photographic ground to meet the 3D floor).
+  - ACESFilmicToneMapping kept; exposure 1.0 → 1.15.
+  - Lights → night grade: key SpotLight 0xdfe9ff @ (3,14,4) steep for tight tire contact shadows, rim 0x9fc0ee 2.4, hemisphere 0x27364e/0x0a0c10 0.5; paint envMapIntensity 0.85→1.25, glass →1.3; headlight/taillight glow sprites boosted for night glare.
+  - Floor → invisible `ShadowMaterial({ opacity: 0.55 })` shadow-catcher only.
+  - Smoke retuned for close-ups: 384→240 particles, 220→105 puffs/s, point cap 300→190 px, ×0.7 night alpha.
+  - Teardown: dispose panorama + PMREM RT, null background/environment (no leaks).
+- Camera keys retuned (world units, car at origin nose +X):
+  - hero (-6.1, 1.5, 4.3) → (0, 0.75, 0) — low rear-3/4 stance, bridge left + skyline right.
+  - front (4.4, 0.5, 2.1) → (2.0, 0.52, 0) — low nose close-up, headlight glare, harbour glow behind.
+  - rear (-4.3, 0.9, 2.2) → (-1.9, 0.68, 0) — taillights/diffuser against the glowing bridge line.
+  - outro (-6.9, 3.1, 7.2) → (0, 1.15, 0) — aim lifted so the bridge stays in the closing card.
+  - Caption copy updated ("glowing bridge line", "harbour glow"); canvas aria-label → lakeside inspection.
+- Verified: lint 0/0; desktop sequence hero/front/rear/outro + full rewind (hero opacity 1); mobile 390×844 (FOV 60 + distance factors, 390=390 no overflow); fresh-load console clean.
+- Deployed: `vercel deploy --prod` → Ready 37s, aliased https://bmw-m5-cs-vert.vercel.app; live panorama HTTP 200 (233,156 B); live screenshots confirm the night scene + car; zero page errors.
+
+Stage Summary:
+- The 3D stage is now a real-world lakeside night set: 360° photo backdrop = IBL, invisible shadow-catcher floor, night-graded lights, tuned scrub choreography — all keyframe/rotation constants documented in-file (KEYS block + ENV_ROTATION_Y/BACKDROP_PITCH_X).
+- Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-bn49qtih2-…).
+- Known note: first load streams the 13 MB glTF — the car pops in after parse (fallback gradient/clear color shows the panorama immediately); subsequent loads are instant (cached).
