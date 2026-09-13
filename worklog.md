@@ -129,3 +129,20 @@ Stage Summary:
 - Site is now fully "BMW M5 CS": logo (roundel + M stripes + M5 CS), nav, hero copy, CTAs, closing card, metadata and favicon all rebranded; 3D scroll experience unchanged.
 - Production: https://bmw-m5-cs-vert.vercel.app (alias) — deployment bmw-m5-5zjt5jevy-akrmsalah79-5807s-projects.vercel.app.
 - Vercel project "bmw-m5-cs" linked in .vercel/project.json; redeploy anytime with `bunx vercel deploy --prod --token <token>`.
+
+---
+Task ID: 5
+Agent: Z.ai Code (main agent)
+Task: Swap the hand-drawn SVG BMW roundel for the user-uploaded official BMW logo — in both the navbar and the favicon — then redeploy to Vercel.
+
+Work Log:
+- Received `upload/BMW.svg.webp` (3840×3840 WebP with alpha, official BMW roundel).
+- Converted with sharp: `public/bmw-roundel.png` (192×192, navbar, 28 KB) and `src/app/icon.png` (256×256, favicon); deleted the old hand-built `src/app/icon.svg` so the App Router file convention serves the real logo.
+- Updated `src/components/scroll-experience.tsx` navbar lockup: `next/image` (36×36, priority, decorative alt) for the roundel + kept the M tricolor stripe SVG + italic-800 "M5 CS" span; logo anchor is now a flex row (gap-2.5). Added `import Image from 'next/image'`.
+- Lint 0/0; local 200; /bmw-roundel.png 200; agent-browser desktop 1440×900 + mobile 390×844: crisp roundel, favicon link = /icon.png, no overflow (390=390), zero page errors.
+- Redeployed: `vercel deploy --prod` → Ready in 31s; production alias https://bmw-m5-cs-vert.vercel.app 200; live /bmw-roundel.png 200 (28,568 B) and /icon.png 200; live screenshot confirms the official roundel in the navbar; zero page errors.
+
+Stage Summary:
+- Navbar and favicon now use the user's official BMW roundel asset; M stripes + "M5 CS" wordmark unchanged.
+- Assets: public/bmw-roundel.png (navbar), src/app/icon.png (favicon). Old SVG roundel fully removed.
+- Production live: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-aygcigw5s-…).

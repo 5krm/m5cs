@@ -23,6 +23,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
+import Image from 'next/image'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -746,47 +747,39 @@ export default function ScrollExperience() {
       <div className="pointer-events-none fixed inset-0 z-10">
         {/* ── Navbar (persists through the whole sequence) ── */}
         <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-4 px-[clamp(20px,5.5vw,80px)] py-[clamp(16px,3vw,32px)]">
-          <a href="#" aria-label="BMW M5 CS — home" className="text-[#f5f2ea] hover:text-[#f5f2ea]">
+          <a
+            href="#"
+            aria-label="BMW M5 CS — home"
+            className="flex items-center gap-2.5 text-[#f5f2ea] hover:text-[#f5f2ea]"
+          >
+            {/* Official BMW roundel (user-provided asset) */}
+            <Image
+              src="/bmw-roundel.png"
+              alt=""
+              width={36}
+              height={36}
+              priority
+              draggable={false}
+              className="block h-9 w-9"
+            />
             <svg
-              width="129"
-              height="36"
-              viewBox="0 0 161 45"
+              width="24"
+              height="16"
+              viewBox="0 0 32 21"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
               aria-hidden="true"
               focusable="false"
             >
-              {/* BMW roundel */}
-              <circle cx="22.5" cy="22.5" r="21.5" fill="#0b0d10" />
-              <circle cx="22.5" cy="22.5" r="21.25" stroke="rgba(255,255,255,0.35)" strokeWidth="0.5" />
-              <circle cx="22.5" cy="22.5" r="15.2" fill="#f2f4f6" />
-              <path d="M22.5 7.3A15.2 15.2 0 0 0 7.3 22.5L22.5 22.5Z" fill="#1C69D4" />
-              <path d="M37.7 22.5A15.2 15.2 0 0 1 22.5 37.7L22.5 22.5Z" fill="#1C69D4" />
-              <defs>
-                <path id="bmw-arc" d="M11.2 11.2A16 16 0 0 1 33.8 11.2" fill="none" />
-              </defs>
-              <text fontSize="5.2" fontWeight="700" fill="#f5f2ea" letterSpacing="2">
-                <textPath href="#bmw-arc" startOffset="50%" textAnchor="middle">
-                  BMW
-                </textPath>
-              </text>
               {/* M tricolor stripes */}
-              <path d="M51 12.5L56.5 12.5L49 32.5L43.5 32.5Z" fill="#009ADA" />
-              <path d="M61.5 12.5L67 12.5L59.5 32.5L54 32.5Z" fill="#2B3990" />
-              <path d="M72 12.5L77.5 12.5L70 32.5L64.5 32.5Z" fill="#E4002B" />
-              {/* M5 CS wordmark */}
-              <text
-                x="84"
-                y="31"
-                fontSize="21"
-                fontWeight="800"
-                fontStyle="italic"
-                letterSpacing="0.5"
-                fill="currentColor"
-              >
-                M5 CS
-              </text>
+              <path d="M5.5 0h5.5L5.5 21H0Z" fill="#009ADA" />
+              <path d="M16 0h5.5L16 21h-5.5Z" fill="#2B3990" />
+              <path d="M26.5 0H32L26.5 21H21Z" fill="#E4002B" />
             </svg>
+            {/* M5 CS wordmark */}
+            <span className="text-[21px] font-extrabold italic leading-none tracking-[0.01em]">
+              M5 CS
+            </span>
           </a>
 
           <nav aria-label="Primary" className="flex flex-wrap items-center gap-[clamp(16px,2.8vw,40px)]">
