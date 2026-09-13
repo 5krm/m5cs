@@ -50,3 +50,33 @@ Stage Summary:
 - Hero background is now a live WebGL drift scene (`bmw-drift-scene.tsx`) instead of the CDN video; the video URL/effect was fully removed.
 - Car styling now mirrors the user's reference photo (gray M5 CS, black wheels, white LEDs).
 - All prior hero elements (navbar, ornament, headline, copy, CTA, overlays, star dots) preserved and re-verified.
+
+---
+Task ID: 2
+Agent: Z.ai Code (main agent)
+Task: Replace the hero background with the user's uploaded real 3D model — a gray BMW M5 CS (F90) drifting donuts with tire smoke — keeping the existing overlays, star dots, navbar and hero content intact.
+
+Work Log:
+- Extracted `upload/bmw_m5_cs_f90.zip` → `scene.gltf` (164 KB) + `scene.bin` (13 MB), 0 external textures, CC-BY-4.0 (author: fvrenbld, Sketchfab). Verified materials already use standard `pbrMetallicRoughness` (blue body paint) — no offline conversion needed.
+- Copied model to `public/models/bmw-m5-cs/` (scene.gltf, scene.bin, license.txt).
+- Installed `three@0.186`, `@react-three/fiber@9.7`, `@react-three/drei@10.7`, `@types/three` (dev).
+- Rebuilt `src/components/bmw-drift-scene.tsx` around the real glTF (previously a procedural extruded-shape car):
+  - `buildCar()`: clones the cached glTF scene, normalizes it (centers footprint, grounds at y=0, longest horizontal span → 4.6 world units), repaints body materials (Bodyshell/Bonnet/Boot/DoorColor) with metallic gray `MeshPhysicalMaterial` (clearcoat) and windows with dark glass, hides giant flat showroom plates.
+  - Smoke anchors (`Object3D`) at the rear tire contact patches publish world positions through a shared `carChannel` (with a `ready` gate so no particles spawn while the model is still loading).
+  - Kept: donut drift animation (radius 5.2, ω 0.85, 31.5° slip angle + countersteer wobble, body roll/pitch/bounce), GPU point-sprite tire smoke (512-particle ring buffer, custom ShaderMaterial, 240 puffs/s, birth-instant alpha ramp, soft canvas sprite), canvas-generated skid-mark rings on the ground, ContactShadows, drei Environment + Lightformers, star-dot overlays and hero UI from page.tsx.
+  - Dropped per-wheel spin/steer pivots: live mesh inspection showed merged tire meshes + misnamed hubs; clustering caused floating/scattering artifacts. Static wheels are imperceptible at hero camera range and the raw model renders perfectly.
+  - Camera: fixed cinematic 3/4 wide shot (11, 4.3, 11 → lookAt origin) with pointer parallax and aspect-aware zoom (1.25× tablet, 1.5× portrait phones) so the whole donut stays in frame.
+  - Resilience: WebGL context-loss listener auto-remounts the Canvas (scene is deterministic from t=0); `useGLTF.preload`; Suspense inside Canvas; dpr capped at 1.5; ContactShadows at 256.
+- page.tsx: added the CC-BY-4.0 attribution line (bottom-left, 10px, white/25) required by the model license.
+- Lint: 0 errors / 0 warnings throughout.
+- Agent-browser verification & fixes discovered through live screenshots/evals:
+  - Fixed smoke `uScale` NaN (`gl.drawingBufferHeight` doesn't exist on WebGLRenderer → `getDrawingBufferSize()`), which had silently disabled all smoke.
+  - Fixed smoke trail gap (alpha curve now peaks at birth) and excessive rise (lower vy + buoyancy); softened sprite gradient and grew puffs so the trail reads as a continuous cloud.
+  - Gated spawning on car readiness (no "origin puffs" during model load).
+  - Confirmed clean render + drift + smoke at 1440×900 / 768×1024 / 375×667; a11y tree intact; CTA/nav untouched; ~2 FPS only under headless SwiftShader (software GL), model is a light 283K verts / 98 meshes for real GPUs.
+
+Stage Summary:
+- The hero background is now a real-time 3D scene: the user's gray BMW M5 CS (F90) doing continuous donuts with tire smoke, skid marks and night lighting, self-framing across desktop/tablet/mobile.
+- Assets: `public/models/bmw-m5-cs/` (glTF + license); scene component: `src/components/bmw-drift-scene.tsx` (client-only, dynamic import, gradient fallback while loading).
+- License compliance: visible "BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0" micro-credit in the hero's bottom-left corner.
+- Known artifacts: headless-browser FPS is not representative (software GL); stale error entries in the long-lived browser session predate the fix and do not reproduce on fresh loads.

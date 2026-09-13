@@ -112,6 +112,11 @@ export default function Home() {
         </nav>
       </header>
 
+      {/* Model attribution (CC-BY-4.0 license requirement) */}
+      <p className="pointer-events-none absolute bottom-2 left-4 z-[2] m-0 text-[10px] leading-none text-white/25">
+        BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0
+      </p>
+
       {/* Hero content — pushed to the bottom of the section */}
       <section className="relative z-[2] mt-auto flex flex-col items-center px-[clamp(20px,8vw,120px)] pb-[clamp(56px,9vh,90px)] pt-[clamp(140px,22vh,220px)] text-center">
         {/* Star ornament */}
