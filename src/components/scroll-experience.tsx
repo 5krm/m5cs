@@ -14,10 +14,15 @@
  *   0.00–0.30  HERO → FRONT   elevated 3/4 →     hero copy fades out
  *                             nose (bg pans      front caption in/out
  *                             bridge → water)
- *   0.42–0.72  FRONT → MID →  arc around nose,   rear caption in/out
+ *   0.30–0.50  FRONT → MID →  arc around nose,   rear caption in/out
  *              REAR           down the far flank
  *                             (bg pans silos → road → port cranes)
- *   0.84–1.00  REAR → OUTRO   pull back wide      closing card fades in
+ *   0.50–0.64  REAR → WHEEL   knee-height close  wheel caption in/out
+ *                             on red calipers
+ *   0.64–0.78  WHEEL → SPECS  wide side profile  perf counters count up
+ *   0.78–0.90  SPECS → ROOF   over the carbon    roof caption in/out
+ *                             roofline
+ *   0.90–1.00  ROOF → OUTRO   pull back wide     closing card fades in
  *
  * GROUNDING RULE (why every camera is raised + tilted down): the 3D car
  * stands on y = 0 while the photographic ground lives inside the panorama.
@@ -27,15 +32,16 @@
  * the approved outro framing. Keep every new keyframe compliant.
  *
  * The "pinned viewport" is a fixed full-viewport stage (canvas + UI
- * overlay) driven by an invisible 440vh scroll track — functionally a
+ * overlay) driven by an invisible 560vh scroll track — functionally a
  * ScrollTrigger pin, but perfectly jitter-free with Lenis on every browser.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import Image from 'next/image'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'meshoptimizer/decoder'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Lenis from 'lenis'
@@ -43,7 +49,10 @@ import 'lenis/dist/lenis.css'
 
 /* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
 
-const MODEL_URL = '/models/bmw-m5-cs/scene.gltf' // CC-BY-4.0 · fvrenbld
+const MODEL_URL = '/models/bmw-m5-cs/scene.min.glb' // CC-BY-4.0 · fvrenbld
+// Meshopt-compressed single file: 12.84 MB glTF+bin → 3.19 MB GLB (89 paint
+// material names preserved — the `optimize` pipeline's palette step merges
+// them and breaks name-based repainting, so run `meshopt` alone).
 const TARGET_LENGTH = 4.6 // car is normalized to this world length
 const FLIP_MODEL = false // set true if a swapped model faces backwards
 
@@ -108,6 +117,9 @@ type CamKey = {
  *        camera azimuth ~38°  → backdrop: open water + silos   (front)
  *        camera azimuth ~208° → backdrop: skyline + port cranes (rear)
  *        camera azimuth ~134° → backdrop: bridge + skyline     (outro)
+ *        camera azimuth ~62°  → backdrop: tree road + lamps     (wheel)
+ *        camera azimuth ~256° → backdrop: port cranes + skyline (specs)
+ *        camera azimuth ~142° → backdrop: bridge towers + sky   (roof)
  */
 const KEYS = {
   /** 0% — BIG car with the city in the MIDDLE of the background. Camera
@@ -144,10 +156,51 @@ const KEYS = {
   /** closing wide elevated rear 3/4 for the end card — the user-approved
    *  "parked in the lot" framing (high camera, asphalt all around). */
   outro: { pos: [-6.9, 3.1, 7.2], target: [0, 1.15, 0], mobileF: 1.35 },
+  /** state 3 — WHEEL / red-caliper close-up, front-left corner. Camera
+   *  drops to knee height (0.72 u) just ~1.6 u from the rim: at that
+   *  distance the photo's near-field asphalt fills everything below the
+   *  hub, so grounding is automatic (no full-car horizon in frame).
+   *  ✏️ target is the caliper face — keep y ≤ 0.4 so the lens stays level
+   *  with the hub, never looking up into the wheel arch. */
+  wheel: { pos: [2.35, 0.62, 2.05], target: [1.45, 0.34, 0.8], mobileF: 1.45, fov: 62 },
+  /** state 4 — SPECS wide: full left-flank profile from the quay-right
+   *  side (the one azimuth the journey never dwelled on) with the port
+   *  cranes + skyline district behind. h 1.7 ÷ d 5.9 keeps the wheels
+   *  ~16° below the photo horizon = parked on asphalt. The whole car is
+   *  in frame as the performance counters count up beside it.
+   *  ✏️ pos[2] (z): more negative = wider, safer margin for the counters. */
+  specs: { pos: [1.6, 1.7, -5.7], target: [0.1, 0.72, 0], mobileF: 1.5, fov: 58 },
+  /** state 5 — ROOFLINE: high behind the cabin looking down the carbon
+   *  roof toward the cowl. Pitch must stay BELOW half the fov or the
+   *  frame fills with parking lot — keep atan((pos[1]-target[1])/d) < ~24°
+   *  so the bridge towers stay in the upper edge of the shot. */
+  roof: { pos: [-1.6, 2.45, 2.3], target: [0.2, 1.25, 0.2], mobileF: 1.5, fov: 62 },
 } satisfies Record<string, CamKey>
 
 const FOV_DESKTOP = 45
 const FOV_MOBILE = 60
+
+/* ✏️ PAINT FINISHES — the body-paint material is ONE shared
+ * MeshPhysicalMaterial across every body panel, so a switch is a single
+ * tween. `frozen` mimics BMW Individual Frozen (matte) finishes: lower
+ * clearcoat + higher roughness. Default = the approved satin grey. */
+type PaintOption = {
+  id: string
+  name: string
+  swatch: string // UI dot color (close to the paint but always visible)
+  color: string
+  metalness: number
+  roughness: number
+  clearcoat: number
+  clearcoatRoughness: number
+}
+const PAINTS: PaintOption[] = [
+  { id: 'frozen-grey', name: 'Frozen Deep Grey', swatch: '#8f959c', color: '#868c93', metalness: 0.82, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.18 },
+  { id: 'sao-paulo', name: 'São Paulo Yellow', swatch: '#d9b616', color: '#c7a70f', metalness: 0.72, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12 },
+  { id: 'imola-red', name: 'Imola Red', swatch: '#a3222c', color: '#8e1c24', metalness: 0.72, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12 },
+  { id: 'isle-of-man', name: 'Isle of Man Green', swatch: '#155243', color: '#0f4237', metalness: 0.75, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.1 },
+  { id: 'black-sapphire', name: 'Black Sapphire', swatch: '#14161c', color: '#0b0d12', metalness: 0.85, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.06 },
+]
 
 /* ═════ 3. PRESENTATION — fully parked, zero drift garnish ═══════════ */
 
@@ -213,6 +266,8 @@ const darkGlass = () =>
 
 type CarRig = {
   car: THREE.Group
+  /** the ONE shared body-paint material (repaint target) */
+  paint: THREE.MeshPhysicalMaterial
 }
 
 /**
@@ -263,7 +318,7 @@ function buildCarRig(source: THREE.Object3D): CarRig {
   const car = new THREE.Group()
   car.add(model)
 
-  return { car }
+  return { car, paint: gray }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -334,7 +389,21 @@ export default function ScrollExperience() {
   const heroLayerRef = useRef<HTMLDivElement>(null)
   const capFrontRef = useRef<HTMLDivElement>(null)
   const capRearRef = useRef<HTMLDivElement>(null)
+  const capWheelRef = useRef<HTMLDivElement>(null)
+  const capRoofRef = useRef<HTMLDivElement>(null)
+  const specsPanelRef = useRef<HTMLDivElement>(null)
+  const specHpRef = useRef<HTMLSpanElement>(null)
+  const specAccelRef = useRef<HTMLSpanElement>(null)
+  const specWeightRef = useRef<HTMLSpanElement>(null)
   const endCardRef = useRef<HTMLDivElement>(null)
+  /* Loading overlay — progress is written via refs (no re-render per chunk) */
+  const loaderRef = useRef<HTMLDivElement>(null)
+  const loaderBarRef = useRef<HTMLDivElement>(null)
+  const loaderPctRef = useRef<HTMLSpanElement>(null)
+  const loaderMsgRef = useRef<HTMLParagraphElement>(null)
+  /* Paint switcher */
+  const [activePaint, setActivePaint] = useState(PAINTS[0].id)
+  const applyPaintRef = useRef<(id: string) => void>(() => {})
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -342,8 +411,23 @@ export default function ScrollExperience() {
     const heroLayer = heroLayerRef.current
     const capFront = capFrontRef.current
     const capRear = capRearRef.current
+    const capWheel = capWheelRef.current
+    const capRoof = capRoofRef.current
+    const specsPanel = specsPanelRef.current
+    const specHp = specHpRef.current
+    const specAccel = specAccelRef.current
+    const specWeight = specWeightRef.current
     const endCard = endCardRef.current
-    if (!canvas || !track || !heroLayer || !capFront || !capRear || !endCard) return
+    const loaderEl = loaderRef.current
+    const loaderBar = loaderBarRef.current
+    const loaderPct = loaderPctRef.current
+    const loaderMsg = loaderMsgRef.current
+    if (
+      !canvas || !track || !heroLayer || !capFront || !capRear || !capWheel ||
+      !capRoof || !specsPanel || !specHp || !specAccel || !specWeight ||
+      !endCard || !loaderEl || !loaderBar || !loaderPct || !loaderMsg
+    )
+      return
 
     let disposed = false
     gsap.registerPlugin(ScrollTrigger)
@@ -461,21 +545,112 @@ export default function ScrollExperience() {
     carGroup.add(contact)
 
     let carRig: CarRig | null = null
-    new GLTFLoader().load(
-      MODEL_URL,
-      (gltf) => {
+    let paintMat: THREE.MeshPhysicalMaterial | null = null
+
+    /* ── Model streaming — REAL progress % into the loading overlay ──
+     * GLTFLoader.load()'s onProgress is unreliable (Content-Length is lost
+     * on some CDNs), so we fetch the GLB ourselves, count bytes against the
+     * header (falling back to an asymptotic trickle), hand the buffer to
+     * GLTFLoader.parse with the MeshoptDecoder, then fade the overlay.
+     * The car settle-in doubles as the reveal beat after the fade. */
+    const t0 = performance.now()
+    const setProgress = (fraction: number) => {
+      const pct = Math.min(100, Math.round(fraction * 100))
+      loaderBar.style.width = `${pct}%`
+      loaderPct.textContent = String(pct) // JSX renders the trailing "%"
+    }
+    let trickle = 0
+
+    ;(async () => {
+      try {
+        const res = await fetch(MODEL_URL)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const total = Number(res.headers.get('content-length') ?? 0)
+        const chunks: Uint8Array[] = []
+        let loaded = 0
+        if (res.body && total > 0) {
+          const reader = res.body.getReader()
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            chunks.push(value)
+            loaded += value.length
+            if (!disposed) setProgress(loaded / total)
+          }
+        } else {
+          // No length header: stream what we can, trickle the visual % so
+          // the bar never lies about being stuck at a wrong 100%.
+          if (res.body) {
+            const reader = res.body.getReader()
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              chunks.push(value)
+              loaded += value.length
+              trickle = 1 - Math.exp(-loaded / (1.2 * 1024 * 1024))
+              if (!disposed) setProgress(trickle * 0.9)
+            }
+          }
+        }
+
+        const buffer = new Uint8Array(loaded)
+        let offset = 0
+        for (const c of chunks) {
+          buffer.set(c, offset)
+          offset += c.length
+        }
+
+        const loader = new GLTFLoader()
+        loader.setMeshoptDecoder(MeshoptDecoder) // EXT_meshopt_compression
+        const gltf = await loader.parseAsync(buffer.buffer, '')
         if (disposed) return
+
         carRig = buildCarRig(gltf.scene)
-        // gentle settle-in entrance once the model has parsed
+        paintMat = carRig.paint
         carRig.car.position.y = -0.12
         carGroup.add(carRig.car)
-        gsap.to(carRig.car.position, { y: 0, duration: 0.9, ease: 'power2.out' })
-      },
-      undefined,
-      (error) => {
-        console.warn('[scroll-experience] car model failed to load:', error)
-      },
-    )
+
+        // Hold the overlay ≥0.8 s so fast connections see a deliberate
+        // beat, not a flash; then fade it and let the car settle in.
+        const elapsed = performance.now() - t0
+        const hold = Math.max(0, 800 - elapsed)
+        window.setTimeout(() => {
+          if (disposed) return
+          gsap.to(loaderEl, {
+            autoAlpha: 0,
+            duration: prefersReduced ? 0.01 : 0.7,
+            ease: 'power1.inOut',
+            onComplete: () => {
+              loaderEl.style.display = 'none'
+            },
+          })
+          gsap.to(carRig!.car.position, { y: 0, duration: 0.9, ease: 'power2.out' })
+        }, hold)
+      } catch (err) {
+        console.warn('[scroll-experience] car model failed to load:', err)
+        if (disposed) return
+        loaderMsg.textContent = 'The 3D model could not be loaded — please check your connection and refresh.'
+        loaderBar.style.backgroundColor = '#a3222c'
+      }
+    })()
+
+    /* Paint switching — tween the shared body material so the finish
+     * cross-fades instead of popping. Registered via ref for the JSX UI. */
+    applyPaintRef.current = (id: string) => {
+      const option = PAINTS.find((p) => p.id === id)
+      if (!option || !paintMat) return
+      setActivePaint(id)
+      const target = new THREE.Color(option.color)
+      gsap.to(paintMat.color, { r: target.r, g: target.g, b: target.b, duration: 0.55, ease: 'power2.inOut' })
+      gsap.to(paintMat, {
+        metalness: option.metalness,
+        roughness: option.roughness,
+        clearcoat: option.clearcoat,
+        clearcoatRoughness: option.clearcoatRoughness,
+        duration: 0.55,
+        ease: 'power2.inOut',
+      })
+    }
 
     /* ── Camera rig state — animated by GSAP, applied every frame ──── */
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fo: FOV_DESKTOP }
@@ -490,7 +665,9 @@ export default function ScrollExperience() {
 
     /* ── GSAP ScrollTrigger choreography ─────────────────────────────
      * One master timeline, scrubbed by scroll. Positions are expressed in
-     * normalized progress units (the whole timeline lasts 1.0).        */
+     * timeline units (total ≈ 1.22; ScrollTrigger normalizes the whole
+     * track to it). Everything — counters included — is a tween, so
+     * scrolling back up rewinds the entire story in reverse.            */
     const buildTimeline = (mobile: boolean) => {
       const K = {
         hero: flattenKey(KEYS.hero, mobile),
@@ -499,6 +676,9 @@ export default function ScrollExperience() {
         mid2: flattenKey(KEYS.mid2, mobile),
         rear: flattenKey(KEYS.rear, mobile),
         outro: flattenKey(KEYS.outro, mobile),
+        wheel: flattenKey(KEYS.wheel, mobile),
+        specs: flattenKey(KEYS.specs, mobile),
+        roof: flattenKey(KEYS.roof, mobile),
       }
       // hard-reset the rig to the hero pose so scrubbing always starts
       // from a known state (and fully rewinds when scrolling back up)
@@ -515,29 +695,61 @@ export default function ScrollExperience() {
         },
       })
 
-      /* Act I — HERO → FRONT (0 → 0.30) */
-      tl.to(cam, { ...K.front, duration: 0.3 }, 0)
-      tl.to(heroLayer, { autoAlpha: 0, y: -42, duration: 0.11, ease: 'power1.in' }, 0.02)
-      tl.fromTo(capFront, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.17)
-      tl.to(capFront, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.36)
+      /* Act I — HERO → FRONT (0 → 0.24), dwell to 0.36 */
+      tl.to(cam, { ...K.front, duration: 0.24 }, 0)
+      tl.to(heroLayer, { autoAlpha: 0, y: -42, duration: 0.09, ease: 'power1.in' }, 0.02)
+      tl.fromTo(capFront, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.07, ease: 'power2.out' }, 0.14)
+      tl.to(capFront, { autoAlpha: 0, y: -22, duration: 0.06, ease: 'power1.in' }, 0.3)
 
-      /* dwell on the front bumper (0.30 → 0.42) — no camera tweens */
-
-      /* Act II — FRONT → MID1 → MID2 → REAR (0.42 → 0.72): three tweens
+      /* Act II — FRONT → MID1 → MID2 → REAR (0.36 → 0.51): three tweens
        * around the nose and the right-rear corner (never through the body).
        * The sweeping reposition pans the 360° backdrop ~245°: silo district
        * → tree-lined road → port cranes → skyline → back to the bridge. */
-      tl.to(cam, { ...K.mid1, duration: 0.1 }, 0.42)
-      tl.to(cam, { ...K.mid2, duration: 0.1 }, 0.52)
-      tl.to(cam, { ...K.rear, duration: 0.1 }, 0.62)
-      tl.fromTo(capRear, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.58)
-      tl.to(capRear, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.78)
+      tl.to(cam, { ...K.mid1, duration: 0.05 }, 0.36)
+      tl.to(cam, { ...K.mid2, duration: 0.05 }, 0.41)
+      tl.to(cam, { ...K.rear, duration: 0.05 }, 0.46)
+      tl.fromTo(capRear, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.07, ease: 'power2.out' }, 0.43)
+      tl.to(capRear, { autoAlpha: 0, y: -22, duration: 0.06, ease: 'power1.in' }, 0.57)
 
-      /* dwell on the rear (0.72 → 0.84) */
+      /* Act III — REAR → WHEEL (0.61 → 0.67), dwell to 0.78 */
+      tl.to(cam, { ...K.wheel, duration: 0.06 }, 0.61)
+      tl.fromTo(capWheel, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.06, ease: 'power2.out' }, 0.64)
+      tl.to(capWheel, { autoAlpha: 0, y: -22, duration: 0.05, ease: 'power1.in' }, 0.73)
 
-      /* Act III — REAR → OUTRO (0.84 → 1.00) + closing card */
-      tl.to(cam, { ...K.outro, duration: 0.16 }, 0.84)
-      tl.fromTo(endCard, { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 0.1, ease: 'power2.out' }, 0.9)
+      /* Act IV — WHEEL → SPECS (0.78 → 0.85), dwell to 0.95.
+       * The performance counters are plain timeline tweens, so the scroll
+       * drives them up AND back down — truly tied to the scroll. */
+      tl.to(cam, { ...K.specs, duration: 0.07 }, 0.78)
+      tl.fromTo(
+        specsPanel,
+        { autoAlpha: 0, y: 34 },
+        { autoAlpha: 1, y: 0, duration: 0.08, ease: 'power2.out' },
+        0.81,
+      )
+      const countTo = (el: HTMLSpanElement, to: number, format: (v: number) => string, at: number, dur: number) => {
+        const state = { v: 0 }
+        tl.to(state, {
+          v: to,
+          duration: dur,
+          ease: 'power1.inOut',
+          onUpdate: () => {
+            el.textContent = format(state.v)
+          },
+        }, at)
+      }
+      countTo(specHp, 627, (v) => String(Math.round(v)), 0.82, 0.11)
+      countTo(specAccel, 3.0, (v) => v.toFixed(1), 0.82, 0.11)
+      countTo(specWeight, 1900, (v) => Math.round(v).toLocaleString('en-US'), 0.82, 0.11)
+      tl.to(specsPanel, { autoAlpha: 0, y: -24, duration: 0.05, ease: 'power1.in' }, 0.97)
+
+      /* Act V — SPECS → ROOFLINE (0.95 → 1.01), dwell to 1.10 */
+      tl.to(cam, { ...K.roof, duration: 0.06 }, 0.95)
+      tl.fromTo(capRoof, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.05, ease: 'power2.out' }, 0.99)
+      tl.to(capRoof, { autoAlpha: 0, y: -22, duration: 0.05, ease: 'power1.in' }, 1.08)
+
+      /* Act VI — ROOF → OUTRO (1.10 → 1.20) + closing card */
+      tl.to(cam, { ...K.outro, duration: 0.1 }, 1.1)
+      tl.fromTo(endCard, { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 0.07, ease: 'power2.out' }, 1.14)
 
       return tl
     }
@@ -628,10 +840,10 @@ export default function ScrollExperience() {
   return (
     <main className="relative w-full bg-[#050608] text-[#f2efe7]">
       {/*
-        Invisible scroll track — its height (440vh) is the scroll distance
+        Invisible scroll track — its height (560vh) is the scroll distance
         ScrollTrigger scrubs the camera timeline through. Fully reversible.
       */}
-      <div ref={trackRef} aria-hidden="true" className="h-[440vh]" />
+      <div ref={trackRef} aria-hidden="true" className="h-[560vh]" />
 
       {/* Fixed 3D stage */}
       <canvas
@@ -775,6 +987,68 @@ export default function ScrollExperience() {
           </p>
         </div>
 
+        {/* ── Stage caption: WHEEL & CALIPER (right side on desktop) ── */}
+        <div
+          ref={capWheelRef}
+          style={{ opacity: 0 }}
+          className="absolute inset-x-5 bottom-28 max-w-[320px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[34%] sm:text-right"
+        >
+          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">03 — Wheels &amp; Brakes</p>
+          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
+            20″ Wheels, Red Calipers
+          </h2>
+          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
+            Forged M doubles and red-painted calipers over the wet lot asphalt.
+          </p>
+        </div>
+
+        {/* ── SPECS panel — counters count up with the scroll, and back */}
+        <div
+          ref={specsPanelRef}
+          style={{ opacity: 0 }}
+          className="absolute inset-x-5 bottom-24 [text-shadow:0_2px_18px_rgba(0,0,0,0.65)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,6vw,96px)] sm:top-[30%] sm:text-right"
+        >
+          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">04 — Performance</p>
+          <div className="mt-4 flex items-end justify-center gap-8 sm:justify-end sm:gap-7 lg:gap-9">
+            <div>
+              <p className="m-0 text-[clamp(26px,4.5vw,44px)] font-bold leading-none tracking-[-0.02em] text-[#f7f4ec]">
+                <span ref={specHpRef}>0</span>
+                <span className="ml-1 text-[0.45em] font-medium text-[#FFB733]">hp</span>
+              </p>
+              <p className="m-0 mt-1.5 text-[11px] uppercase tracking-[0.18em] text-white/55">Twin-turbo V8</p>
+            </div>
+            <div>
+              <p className="m-0 text-[clamp(26px,4.5vw,44px)] font-bold leading-none tracking-[-0.02em] text-[#f7f4ec]">
+                <span ref={specAccelRef}>0.0</span>
+                <span className="ml-1 text-[0.45em] font-medium text-[#FFB733]">s</span>
+              </p>
+              <p className="m-0 mt-1.5 text-[11px] uppercase tracking-[0.18em] text-white/55">0–100 km/h</p>
+            </div>
+            <div>
+              <p className="m-0 text-[clamp(26px,4.5vw,44px)] font-bold leading-none tracking-[-0.02em] text-[#f7f4ec]">
+                <span ref={specWeightRef}>0</span>
+                <span className="ml-1 text-[0.45em] font-medium text-[#FFB733]">kg</span>
+              </p>
+              <p className="m-0 mt-1.5 text-[11px] uppercase tracking-[0.18em] text-white/55">DIN weight</p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Stage caption: ROOFLINE (left side on desktop) ── */}
+        <div
+          ref={capRoofRef}
+          style={{ opacity: 0 }}
+          className="absolute inset-x-5 bottom-28 max-w-[320px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[30%]"
+        >
+          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">05 — Carbon Roof</p>
+          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
+            70 kg Lighter
+          </h2>
+          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/55">
+            A carbon-fibre roof and ruthless dieting, below the bridge towers.
+          </p>
+        </div>
+
         {/* ── Closing card ── */}
         <div
           ref={endCardRef}
@@ -805,9 +1079,69 @@ export default function ScrollExperience() {
           </a>
         </div>
 
+        {/* ── Paint switcher — bottom-left, above the credit line ── */}
+        <div className="pointer-events-auto absolute bottom-7 left-4 z-20 flex items-center gap-2">
+          <span className="sr-only" id="paint-label">
+            Paint finish
+          </span>
+          {PAINTS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              title={p.name}
+              aria-pressed={activePaint === p.id}
+              aria-label={`Paint finish: ${p.name}`}
+              onClick={() => applyPaintRef.current(p.id)}
+              className={`flex h-11 w-11 items-center justify-center rounded-full transition-transform duration-200 hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFB733] ${
+                activePaint === p.id ? 'scale-110' : ''
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`block h-[18px] w-[18px] rounded-full border transition-shadow ${
+                  activePaint === p.id
+                    ? 'border-[#FFB733] shadow-[0_0_0_2px_rgba(255,183,51,0.45)]'
+                    : 'border-white/40'
+                }`}
+                style={{ backgroundColor: p.swatch }}
+              />
+            </button>
+          ))}
+        </div>
+
         {/* CC-BY-4.0 license attribution (required by the model author) */}
         <p className="absolute bottom-2 left-4 m-0 text-[10px] leading-none text-white/25">
           BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0
+        </p>
+      </div>
+
+      {/* ── Loading overlay — real fetch % of the meshopt GLB, then fades ── */}
+      <div
+        ref={loaderRef}
+        role="status"
+        aria-live="polite"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#050608] px-6 text-center"
+      >
+        <div aria-hidden="true" className="mb-5 flex items-center gap-2.5">
+          <Image src="/bmw-roundel.png" alt="" width={34} height={34} priority draggable={false} className="block h-[34px] w-[34px]" />
+          <svg width="24" height="16" viewBox="0 0 32 21" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <path d="M5.5 0h5.5L5.5 21H0Z" fill="#009ADA" />
+            <path d="M16 0h5.5L16 21h-5.5Z" fill="#2B3990" />
+            <path d="M26.5 0H32L26.5 21H21Z" fill="#E4002B" />
+          </svg>
+          <span className="text-[20px] font-extrabold italic leading-none tracking-[0.01em] text-[#f5f2ea]">M5 CS</span>
+        </div>
+        <p ref={loaderMsgRef} className="m-0 mb-6 text-[12px] uppercase tracking-[0.3em] text-white/60">
+          Preparing your M5 CS
+        </p>
+        <div className="relative h-[3px] w-60 overflow-hidden rounded-full bg-white/10">
+          <div
+            ref={loaderBarRef}
+            className="absolute inset-y-0 left-0 w-0 rounded-full bg-[#FFB733] transition-[width] duration-200 ease-out"
+          />
+        </div>
+        <p className="m-0 mt-3 text-[12px] font-medium tabular-nums text-[#e8ddc4]">
+          <span ref={loaderPctRef}>0</span>%
         </p>
       </div>
     </main>
