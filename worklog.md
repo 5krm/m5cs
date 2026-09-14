@@ -131,186 +131,23 @@ Stage Summary:
 - Vercel project "bmw-m5-cs" linked in .vercel/project.json; redeploy anytime with `bunx vercel deploy --prod --token <token>`.
 
 ---
-Task ID: 5
-Agent: Z.ai Code (main agent)
-Task: Swap the hand-drawn SVG BMW roundel for the user-uploaded official BMW logo — in both the navbar and the favicon — then redeploy to Vercel.
-
-Work Log:
-- Received `upload/BMW.svg.webp` (3840×3840 WebP with alpha, official BMW roundel).
-- Converted with sharp: `public/bmw-roundel.png` (192×192, navbar, 28 KB) and `src/app/icon.png` (256×256, favicon); deleted the old hand-built `src/app/icon.svg` so the App Router file convention serves the real logo.
-- Updated `src/components/scroll-experience.tsx` navbar lockup: `next/image` (36×36, priority, decorative alt) for the roundel + kept the M tricolor stripe SVG + italic-800 "M5 CS" span; logo anchor is now a flex row (gap-2.5). Added `import Image from 'next/image'`.
-- Lint 0/0; local 200; /bmw-roundel.png 200; agent-browser desktop 1440×900 + mobile 390×844: crisp roundel, favicon link = /icon.png, no overflow (390=390), zero page errors.
-- Redeployed: `vercel deploy --prod` → Ready in 31s; production alias https://bmw-m5-cs-vert.vercel.app 200; live /bmw-roundel.png 200 (28,568 B) and /icon.png 200; live screenshot confirms the official roundel in the navbar; zero page errors.
-
-Stage Summary:
-- Navbar and favicon now use the user's official BMW roundel asset; M stripes + "M5 CS" wordmark unchanged.
-- Assets: public/bmw-roundel.png (navbar), src/app/icon.png (favicon). Old SVG roundel fully removed.
-- Production live: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-aygcigw5s-…).
-
----
-Task ID: 6
-Agent: Z.ai Code (main agent)
-Task: Replace the indoor studio backdrop with the user's 360° equirectangular lakeside night-city panorama (background + IBL), per the "senior Three.js" spec: ACES/exposure tuning, metallic night reflections, invisible ShadowMaterial floor (opacity 0.55), and retuned scroll camera choreography (hero skyline → front glare → rear bridge), keeping Lenis + scrub 1.2 + mobile FOV handling.
-
-Work Log:
-- Optimized `upload/Gemini_Generated_Image_om63vaom63vaom63.jpg` (2912×1440, 2.5 MB) → exact 2:1 `public/environment/night_city_lake_360.jpg` (2560×1280, 228 KB) for correct equirect mapping.
-- `src/components/scroll-experience.tsx` — scene integration:
-  - Removed canvas studio backdrop, FogExp2, RoomEnvironment, glossy floor + light-pool helpers.
-  - ONE TextureLoader panorama → `scene.background` (EquirectangularReflectionMapping, SRGB, anisotropy 8) AND `scene.environment` via `PMREMGenerator.fromEquirectangular` so paint reflections match the visible photo; clear-color fallback while it streams.
-  - `scene.backgroundRotation`/`environmentRotation` kept identical: `ENV_ROTATION_Y=-0.19` (empirically calibrated: skyline behind hero, bridge behind rear, harbour behind front) + `BACKDROP_PITCH_X=0.12` (raises the photographic ground to meet the 3D floor).
-  - ACESFilmicToneMapping kept; exposure 1.0 → 1.15.
-  - Lights → night grade: key SpotLight 0xdfe9ff @ (3,14,4) steep for tight tire contact shadows, rim 0x9fc0ee 2.4, hemisphere 0x27364e/0x0a0c10 0.5; paint envMapIntensity 0.85→1.25, glass →1.3; headlight/taillight glow sprites boosted for night glare.
-  - Floor → invisible `ShadowMaterial({ opacity: 0.55 })` shadow-catcher only.
-  - Smoke retuned for close-ups: 384→240 particles, 220→105 puffs/s, point cap 300→190 px, ×0.7 night alpha.
-  - Teardown: dispose panorama + PMREM RT, null background/environment (no leaks).
-- Camera keys retuned (world units, car at origin nose +X):
-  - hero (-6.1, 1.5, 4.3) → (0, 0.75, 0) — low rear-3/4 stance, bridge left + skyline right.
-  - front (4.4, 0.5, 2.1) → (2.0, 0.52, 0) — low nose close-up, headlight glare, harbour glow behind.
-  - rear (-4.3, 0.9, 2.2) → (-1.9, 0.68, 0) — taillights/diffuser against the glowing bridge line.
-  - outro (-6.9, 3.1, 7.2) → (0, 1.15, 0) — aim lifted so the bridge stays in the closing card.
-  - Caption copy updated ("glowing bridge line", "harbour glow"); canvas aria-label → lakeside inspection.
-- Verified: lint 0/0; desktop sequence hero/front/rear/outro + full rewind (hero opacity 1); mobile 390×844 (FOV 60 + distance factors, 390=390 no overflow); fresh-load console clean.
-- Deployed: `vercel deploy --prod` → Ready 37s, aliased https://bmw-m5-cs-vert.vercel.app; live panorama HTTP 200 (233,156 B); live screenshots confirm the night scene + car; zero page errors.
-
-Stage Summary:
-- The 3D stage is now a real-world lakeside night set: 360° photo backdrop = IBL, invisible shadow-catcher floor, night-graded lights, tuned scrub choreography — all keyframe/rotation constants documented in-file (KEYS block + ENV_ROTATION_Y/BACKDROP_PITCH_X).
-- Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-bn49qtih2-…).
-- Known note: first load streams the 13 MB glTF — the car pops in after parse (fallback gradient/clear color shows the panorama immediately); subsequent loads are instant (cached).
-
----
-Task ID: 7
-Agent: Z.ai Code (main agent)
-Task: Revert the environment direction per user correction — replace the lakeside night panorama with the user's 360° equirectangular STUDIO panorama ('studio_360.jpg') as scene.background + scene.environment, restore ShadowMaterial opacity 0.4, retune the scroll camera sequence (low-angle hero → front bumper zoom → rear diffuser orbit), scrub 1.2, 300vh track, mobile FOV on resize.
-
-Work Log:
-- Identified the correct upload: Gemini_Generated_Image_q2yuwoq2yuwoq2yu.jpg (2912×1440 ≈ 2:1 equirect; the sm41dq… file was the flat perspective reference). sharp → exact 2:1 `public/textures/studio_360.jpg` (2048×1024, 182 KB); removed the now-unused `public/environment/night_city_lake_360.jpg`.
-- `src/components/scroll-experience.tsx` — studio integration (ENV_URL swap + rename lakeTex→studioTex, lakeEnvRT→studioEnvRT):
-  - ONE TextureLoader panorama → scene.background (EquirectangularReflectionMapping, SRGB, anisotropy 8) AND scene.environment via PMREMGenerator.fromEquirectangular → paint reflects the real softbox/walls; ACESFilmicToneMapping exposure 1.15 → 1.05 (softbox whites short of clipping); fallback clear 0x0a0b0d.
-  - Rotations: ENV_ROTATION_Y 0 (softbox centered +X), BACKDROP_PITCH_X −0.25 → +0.1 after visual tuning (negative pulled the ceiling into frame; positive plants the photo floor at y=0 and keeps the softbox peeking at the top).
-  - Lights regraded from night to studio: key SpotLight 0xdfe9ff@340 (3,14,4) → 0xf5f8ff@190 overhead (0.4, 9, 1.2) wide-angle/penumbra 0.9 — shadow pools straight under the tires; rim 0x9fc0ee 2.4 → 0xe8edf4 1.1 neutral fill; hemisphere 0.5 night → 0.5 neutral 0x3d434b/0x131518.
-  - Floor: ShadowMaterial opacity 0.55 → 0.4, radius 90 → 60 (photo concrete is the visible floor).
-  - Paint retuned for the dark-walled studio: metalness 0.82 → 0.7, envMapIntensity 1.25 → 1.55 (glass 1.3 → 1.5, trims 0.7 → 0.9) — car was otherwise near-invisible reflecting black cyc walls.
-  - Camera KEYS retuned: hero (-6.1,1.5,4.3) → LOW (-6.0,0.78,4.7)→(0,0.78,0); front (4.4,0.5,2.1) → tighter (3.55,0.52,1.5)→(2.1,0.5,0.05); rear (-4.3,0.9,2.2) → (-3.95,0.66,1.75)→(-2.0,0.58,0); outro (-6.9,3.1,7.2) → (-6.6,2.6,6.8)→(0,1.0,0). scrub already 1.2; scroll track 440vh → 300vh per spec.
-  - Removed night-only garnish: STAR_DOTS overlay + starDotStyle + CSSProperties import (stars make no sense indoors); captions updated (softbox / studio key light); aria-label → studio inspection.
-- Verified: lint 0/0; agent-browser desktop 1440×900 full sequence (hero low-angle drift → front close-up with Laserlight/kidneys → rear 3/4 diffuser+quad+smoke → outro end card → full reverse rewind restoring hero); mobile 390×844 (FOV 60 + mobileF, head-on front crop); zero console/page errors; first-load note: 13 MB glTF parse leaves ~8 s of panorama-only view before the car pops in.
-- Deployed: `vercel deploy --prod` → aliased https://bmw-m5-cs-vert.vercel.app; live /textures/studio_360.jpg 200 (185,776 B); live screenshots confirm studio hero + front close-up with car; zero page errors.
-
-Stage Summary:
-- The 3D stage is now a photographic light studio: 360° softbox panorama drives both backdrop and IBL, invisible 0.4 shadow-catcher floor, studio-graded lights, low-angle→front→rear scrub choreography on a 300vh track — every tweakable (KEYS, ENV_ROTATION_Y, BACKDROP_PITCH_X, FOV_*, exposure) documented in-file.
-- Production: https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-lkxz58sfz-…).
-
----
-Task ID: 8
-Agent: Z.ai Code (main agent)
-Task: Revert to commit 18c6105 (lakeside night 360 backdrop) per user request, then fix the two user-reported defects: (1) the car floated above the photo ground in hero/front/rear shots (only the outro framing looked parked), (2) the 360° panorama showed only one district — camera transitions did not reveal other parts of the image.
-
-Work Log:
-- Restored `src/components/scroll-experience.tsx` + `public/environment/night_city_lake_360.jpg` from 18c6105; deleted `public/textures/studio_360.jpg` (Task 7 direction rolled back).
-- Root-cause analysis: (a) floating = low, level cameras put the panorama's water/quay band behind the wheels; grounding only works when the camera is raised and tilted down (like the approved outro), because the wheels (finite distance) must project BELOW the photo's railing line (infinite skybox); (b) static backdrop = hero/rear/outro cameras all sat in the same ~135-155° azimuth quadrant, so all three dwelled on the same bridge view.
-- Tried and REMOVED a visible 3D asphalt disc (radius 16 → 4.2 iterations): it always read as a dark podium pasted over the photo's parking lines; grounding must come from camera geometry, not a visible floor. Kept the invisible ShadowMaterial catcher (r 7, opacity 0.45) with an in-file warning not to grow it into a disc.
-- New choreography in `scroll-experience.tsx` (all ✏️-commented): hero (-6.8,2.2,4.8)→(0,0.58,0) elevated 3/4, bridge+skyline backdrop, grounded; front (4.35,1.35,3.35)→(1.75,0.45,0.28) raised from the old 0.5 bumper-cam, silo/water backdrop; NEW waypoints mid1 (5.2,1.22,-2.7) + mid2 (-1.7,1.7,-4.7) arc the lens around the nose and right-rear corner (straight front→rear tween clipped the body); rear (-6.0,2.6,3.2)→(-1.85,0.5,0) — three right-side rear variants floated over the skyline band's 10 m-wide quay walkway, so rear returns to the quay-LEFT side where the railing is close and the lot runs to the tires; outro unchanged (user-approved). Act II split into three 0.1-duration tweens (0.42/0.52/0.62) — the journey sweeps the panorama ~245° (silos → road → port cranes → skyline → bridge).
-- Added optional per-shot `fov` to CamKey/FlatKey: GSAP-tweened `fo` applied in applyCamera() (updateProjectionMatrix only on change); rear uses fov 50; BACKDROP_PITCH_X 0.12 → 0.06 for tower headroom; lint 0/0 throughout.
-- Verified via agent-browser on localhost (1440×900): hero/front/mid-flank/rear/outro + 1750px mid-transition (port-cranes flank shot, no body clipping) + reverse scroll; mobile 390×844 hero/front/rear grounded with FOV 60 + mobileF; fresh-load console clean (the WebGL 'precision' error was a stale dev-only Fast Refresh artifact).
-- Deployed `vercel deploy --prod` → https://bmw-m5-cs-vert.vercel.app (HTTP 200, title OK); live screenshots confirm hero (bridge, grounded), rear (lot asphalt + benches + water), front (silo district); committed as git revert + choreography commit.
-
-Stage Summary:
-- Both user defects fixed and live: the car is parked ON the wet lot asphalt in all four dwell states (wheels below the quay line, real contact shadow), and each scroll transition now pans a different district of the 360° photo (bridge → silos/water → cranes/skyline flank → bridge), with the panorama fully swept across the journey.
-- Camera grounding rules documented in-file (GROUNDING RULE + GROUNDING CHEAT-SHEET + per-key comments): raise pos[1], aim target[1] low, keep distance ≥4.5, spread azimuths, use per-shot fov; rear must stay on the quay-left side.
-- Production: https://bmw-m5-cs-vert.vercel.app
-
----
-Task ID: 9
-Agent: Z.ai Code (main agent)
-Task: Per user feedback on the live Task 8 build — (1) hero: the car clipped into the quay curb and read too small; make the car BIG with the city clearly visible in front of it, (2) in the remaining sections the "zoom-ins" must feel like a wide 0.4× phone-camera zoom so the 360° city stays clearly visible instead of being cropped away.
-
-Work Log:
-- Root cause: Task 8's hero stood 8.3 u back on a 45° lens (small car; its front overlapped the bench/quay line = "داخلة بالرصيف"), and the front dwell (d 4.1, fov 45) cropped the city out entirely — a narrow telephoto zoom kills the 360° context.
-- New rule added to the in-file GROUNDING CHEAT-SHEET: WIDE LENS RULE — when a shot moves close to the car, widen `fov` (60–66) instead of cropping tighter; wide lens keeps the city readable around a big car.
-- KEYS retuned (all ✏️-commented): hero pos [-6.8,2.2,4.8]→[-4.75,2.4,3.35], target y 0.58→0.48, fov 56 — car ~40% bigger, contact point ~7° further below the quay line (curb fixed), bridge+skyline fully visible above. front [4.35,1.35,3.35]→[5.0,2.3,3.85], fov 66 (ultra-wide 0.4× look; iterated 1.42→1.75→2.05→2.3 height via screenshots until the wheels landed on the lined asphalt instead of the walkway). mid1 y 1.22→1.5 fov 62; mid2 y 1.7→2.1 fov 64 (side-profile float fixed); rear [-6.0,2.6,3.2]→[-6.3,2.5,3.35] fov 60. outro untouched (user-approved).
-- CamKey semantics: per-shot `fov` is now DESKTOP-only (portrait already uses wide FOV_MOBILE 60; new optional `fovMobile` override added to type + flattenKey) — verified hero/front/rear on 390×844: big grounded car, city clear, no cropping.
-- Verified localhost via agent-browser: desktop 1440×900 sequence hero → front (0.389) → head-on mid (0.47) → cranes side profile (0.57) → rear (0.80) → outro (1.0) → reverse rewind; all grounded, city visible in every dwell, no body clipping, no new console errors (only the known dev-only Fast Refresh WebGL artifact). lint 0/0. Committed c998738.
-- Deploy BLOCKED: Vercel CLI session lost its credentials between sessions (`vercel whoami` → Logged out; no token in env/dotfiles/tool-results). `bunx vercel deploy --prod` errors with "No existing credentials found". Needs `vercel login` or `--token <TOKEN>` from the user; project link (.vercel/project.json → bmw-m5-cs) is intact so a token deploy will hit the same domain.
-
-Stage Summary:
-- All three user complaints fixed locally and browser-verified: hero = BIG grounded car with the bridge/skyline city clearly in front, no curb clipping; every close-up now uses the wide 0.4×-style lens (fov 60–66 desktop) so the 360° city stays readable throughout the scroll; transitions (head-on nose, cranes side profile) equally grounded.
-- Production NOT updated this round: Vercel auth expired in this sandbox — run `bunx vercel login` yourself or hand me a token and I'll `bunx vercel deploy --prod --token …` immediately (code is committed at c998738, ready to ship).
-
----
-Task ID: 10
-Agent: Z.ai Code (main agent)
-Task: User follow-up — (1) remove the drifting smoke and light-glow effects entirely, (2) fix the front/head-on frames that still read as "car in the air / just hit something".
-
-Work Log:
-- Deleted the entire drift garnish stack from scroll-experience.tsx (~160 lines): SMOKE_* constants, makeSoftCircleTexture, SMOKE_VERTEX/FRAGMENT shaders, createSmokeSystem pool, smoke wiring (spawn/update/dispose), the 4 headlight/taillight glow sprites, IDLE_SWAY body-bob (updateWorld removed; tick is now just lenis + applyCamera + render; updatePointScale + its drawSize helper dropped). Car sits DEAD STILL — micro-bob was part of the floating illusion. CarRig anchors removed. Cleanup path disposes contactTex instead of softTex.
-- Grounding fix for dark-asphalt frames: new makeContactShadowTexture → soft dark radial ellipse (TARGET_LENGTH×1.16 × ×0.52, opacity 0.72) added inside carGroup at y 0.012 (yaws with the car, renders above the catcher) — a fake-AO contact patch that anchors the wheels when the photo asphalt under the car is near-black. ShadowMaterial catcher opacity 0.45 → 0.62.
-- front key raised 2.3 → 2.6 (target y 0.42): wheels now project onto the lined asphalt instead of the walkway band — verified the exact user-reported framings: front dwell (0.389), head-on (0.47), rear (0.80), hero, mobile 390×844 hero+front; smoke/glow gone everywhere, Laserlights now read naturally from the model's own emissive.
-- lint 0/0; committed. Vercel deploy still blocked (no credentials in sandbox — pending user token/login from Task 9 note).
-
-Stage Summary:
-- Drift theme fully removed (smoke, glows, sway); the M5 CS is a parked car in every frame, anchored by a real cast shadow + fake-AO contact ellipse.
-- All previously floating framings verified grounded on desktop + mobile.
-- Production still awaiting Vercel re-auth; code ready at commit.
-
----
-Task ID: 11
-Agent: Z.ai Code (main agent)
-Task: User request — "i want the first part to show the car big and the city 'mid of background'" — reframe the hero shot so the car reads bigger and the city skyline sits in the MIDDLE of the background (it hugged the top edge before).
-
-Work Log:
-- Diagnosis from a fresh 1440×900 screenshot: the Task 9 hero (pos [-4.75,2.4,3.35], target y 0.48, fov 56) tilted the lens down ~18°, which pinned the photo horizon at ~14% of frame height — the bridge/skyline were squeezed into the top band while water filled the middle; car spanned only ~39% of frame width.
-- Reframed the hero key (single edit, all other keys untouched): pos [-3.76,1.95,2.65] (same azimuth → same bridge+skyline district; horizontal distance 5.81→4.6u = car ~25% bigger), height 2.4→1.95, target y 0.48→1.42 (near-level aim, pitch ≈6.6°), fov 56→60 (keeps the approved 0.4× wide-lens look; horizon now lands at ~42–44% = city mid-background).
-- Grounding preserved by geometry, not pitch: wheels project atan(1.95/4.6) ≈ 23° below the photo horizon (open lot asphalt ≈3.6m into the photo); first iteration at height 1.75 put the nose wheels near the bright walkway band, so height was raised to 1.95 — verified the nose + contact shadow sit on dark asphalt.
-- Verified via agent-browser (desktop 1440×900, wheel-driven scrolling — NOTE: programmatic window.scrollTo fights Lenis's internal target and stalls mid-tween; always use mouse wheel + wait): hero (big grounded car, bridge+skyline mid-frame), Act I tweens 0.06/0.12/0.23/0.28, head-on waypoint 0.47, cranes flank 0.59, rear dwell 0.78, outro 1.0 (user-approved framing untouched), full reverse rewind restoring the hero exactly. Mobile 390×844: hero (car full-width, city clear), front 0.38, rear 0.80 — all grounded, no cropping.
-- lint 0/0. Committed 4a3df46. Vercel deploy still blocked (sandbox credentials lost since Task 9 — needs `vercel login` or a --token).
-
-Stage Summary:
-- Hero now reads as a poster shot: BIG car filling the lower half, suspension bridge + skyline towers centered in the middle band of the 360° background, wheels welded to the lot asphalt by the cast shadow + contact blob.
-- Scroll-track geometry reminder for future sessions: track 300vh → scrollHeight 3960 @900px viewport → scrollable 3060 (progress = scrollY/3060). Mobile scrollable 2870 @844px.
-- Production still awaiting Vercel re-auth; commits c998738 → d55bd7b → 4a3df46 are ready to ship together.
-
----
-Task ID: 12
-Agent: Z.ai Code (main agent)
-Task: Deploy the pending commits (c998738 camera v9, d55bd7b smoke removal + contact blob, 4a3df46 hero v10) to Vercel production using the user-provided token.
-
-Work Log:
-- User supplied a Vercel token after the Task 9/10/11 auth blockage; `bunx vercel whoami --token …` → account `8krm`.
-- `bunx vercel deploy --prod --token …` → build completed in 17s, Ready in 33s, aliased to https://bmw-m5-cs-vert.vercel.app (deployment bmw-m5-97454dzgh-…).
-- Live verification via agent-browser 1440×900 on the production URL: hero = big car with bridge+skyline mid-background, grounded; front dwell (0.389) grounded on lined asphalt with zero drift smoke; rear dwell (0.80) grounded against the bridge district; no page errors. HTTP 200 on the domain.
-
-Stage Summary:
-- ALL pending work is now LIVE at https://bmw-m5-cs-vert.vercel.app — Task 9 wide-lens close-ups, Task 10 drift-smoke/glow removal + contact-shadow grounding, Task 11 hero reframing (big car, city mid-background).
-- Token handled per user message; consider rotating it if it was shared unintentionally.
-
----
-Task ID: 13
-Agent: Z.ai Code (main agent)
-Task: User-approved feature batch — (1) compress the 12.7 MB model, (2) loading screen with progress %, (3) three new camera chapters (wheel/caliper, specs wide, roofline), (4) specs counters (627 hp / 3.0 s / 1,900 kg) tied to scroll, (5) paint color switcher, then deploy.
-
-Work Log:
-- Compression: `gltf-transform optimize` shrank to 1.65 MB BUT its palette step replaced the 89 named materials with PaletteMaterial001/002 — would have broken name-based repaint + the switcher. Redid with `gltf-transform meshopt` ONLY: scene.min.glb 3.19 MB, all 89 material names verified intact (KHR_mesh_quantization + EXT_meshopt_compression). Deleted scene.gltf/scene.bin; added `meshoptimizer` dep; GLTFLoader.setMeshoptDecoder(MeshoptDecoder).
-- Loading screen: replaced GLTFLoader.load with fetch-stream byte counting (Content-Length real %; asymptotic trickle fallback) → GLTFLoader.parseAsync. Overlay: roundel + M tricolor + wordmark, gold progress bar, % (fixed a double-%% bug), min 800 ms hold, 0.7 s fade, then the car settle-in plays as the reveal. Error path swaps the status line + red bar.
-- Chapters: track 440vh → 560vh; timeline renormalized (total ≈ 1.22 units). New KEYS: wheel (2.35,0.62,2.05)→(1.45,0.34,0.8) fov 62 — knee-height caliper close-up (iterated from 2.75/0.72/2.5 after screenshots read too far); specs (1.6,1.7,-5.7)→(0.1,0.72,0) fov 58 — the never-dwelled right-flank azimuth, cranes + skyline backdrop; roof (-1.6,2.45,2.3)→(0.2,1.25,0.2) fov 62 — iterated 3× (first draft pitched 39° and filled 60% of frame with empty asphalt; second draft yawned at the dark hillside; final az 325° puts the harbor + city glow above the carbon roof at 23° pitch).
-- Specs counters: plain timeline tweens on proxy objects (snap via format fns) → scrub-driven up AND down, truly scroll-tied; panel right-aligned desktop top-30% (moved off the rear decklid), bottom sheet on mobile. Captions 03 Wheels/Brakes + 05 Carbon Roof added.
-- Paint switcher: PAINTS (Frozen Deep Grey default, São Paulo Yellow, Imola Red, Isle of Man Green, Black Sapphire); buildCarRig now exposes the shared MeshPhysicalMaterial; switching tweens color + metalness/roughness/clearcoat over 0.55 s; 44 px swatch buttons bottom-left with aria-pressed + gold active ring; registered via applyPaintRef so the 3D effect owns the material.
-- Verified: lint 0/0; desktop 1440×900 full sequence hero → front (815) → rear (1731) → wheel (2376) → specs (3055) → roof (3564) → outro (4140) → full rewind to hero; loader captured at 83% mid-fetch; yellow repaint verified live; mobile 390×844 hero/wheel/specs (counters completed 627/3.0/1,900). Committed 1eda5b4.
-- Deployed with the user token → https://bmw-m5-cs-vert.vercel.app (Ready, aliased).
-
-Stage Summary:
-- The showcase is now a 7-chapter scroll story: hero (big car, city mid) → front → sweep → rear → wheel/caliper → specs with scroll-driven counters → carbon roofline → outro, plus a runtime paint configurator and a sub-4-second branded load (3.2 MB GLB vs 12.7 MB).
-- Gotcha recorded: never run `gltf-transform optimize` on this model (palette step destroys material names) — use `meshopt` alone.
-
----
 Task ID: 14
 Agent: Z.ai Code (main agent)
-Task: Deploy commit 1eda5b4 (loading screen + chapters + counters + paint switcher) to Vercel production.
+Task: Revert the entire project to commit c2609dd (user request: "lets revert to this git c2609dd").
 
 Work Log:
-- First deploy attempt timed out at 300 s; left deployment bmw-m5-jriye8eni stuck UNKNOWN. Second attempt (600 s) same → bmw-m5-2ekyd0pc8 UNKNOWN. Both removed via `vercel remove -y` to unblock the hobby single-build queue.
-- Two further attempts (nohup background, 3e2atda1z latest) all reach "Building…" then sit UNKNOWN for 15+ min with ZERO build logs (`vercel logs` → "No logs found") — the builder never picks them up. The Task 12 deploy one hour earlier built in 28 s, and the project builds/runs locally (dev server verified all features), so this is a Vercel platform-side builder/queue outage, not a code or lockfile issue (bun.lock + package.json diff verified clean; meshoptimizer is pure JS, no install scripts).
-- Live domain still serves the previous Ready deployment (camera v9/v10, no new features) — scene.min.glb 404s on prod until the queued deployment completes.
+- Located c2609dd in history: the Task-4-era checkpoint (BMW rebrand + first Vercel deploy) — studio vignette backdrop, drift-smoke garnish, original 4-state choreography (hero drift pose → front → rear → outro) on the 440vh track, uncompressed 12.7MB scene.gltf.
+- Reverted with `git read-tree -u --reset c2609dd^{tree}` (index + worktree match that tree exactly; history preserved — the Task 8/9/10/11/13 work remains reachable at 9d58218, so nothing is lost if the user wants it back).
+- Revert removes: Task 13 meshopt scene.min.glb + loading screen + specs counters + paint switcher + wheel/roof chapters, lake 360 backdrop, icon.png, bmw-roundel.png, Task 11 hero rework, Task 10 smoke removal, Task 9 wide-lens close-ups, and the `meshoptimizer` dependency (node_modules resynced via `bun install`).
+- Note: `.vercel/` project link is untracked and unaffected.
+
+Verification:
+- `bun run lint`: 0/0.
+- Desktop agent-browser: hero renders (studio backdrop + drift pose + smoke), scrub to page bottom reaches the outro closing card (scrollHeight 2539 = 440vh exactly; max scrollY 1962), reverse scrub rewinds to hero with copy restored.
+- Mobile 390×844: renders, no horizontal overflow (390=390).
+- Page errors: none; console: none.
+- dev.log: only the expected transient Fast-Refresh full-reload line from the mass file swap; fresh loads after it are clean.
 
 Stage Summary:
-- Commit 1eda5b4 is fully built, verified, and pushed as a PRODUCTION deployment (bmw-m5-3e2atda1z) that is QUEUED on Vercel. Because it is a production deployment, when Vercel's builders recover it should build and auto-alias to https://bmw-m5-cs-vert.vercel.app with no further action.
-- If it does not complete: retry with `bunx vercel deploy --prod --token <TOKEN>` (or `vercel login` + same without token). Check with `bunx vercel ls bmw-m5-cs` → Status must read ● Ready.
-- Verification recipe after it goes live: `curl -sI https://bmw-m5-cs-vert.vercel.app/models/bmw-m5-cs/scene.min.glb` must return 200 with content-length 3188780.
+- Project state = c2609dd (studio era with drift smoke) committed as a new commit on main; previous timeline (Tasks 5–13) fully preserved in git history at 9d58218.
+- Production (Vercel) still serves the pre-revert deployment until the next `bunx vercel deploy --prod`.
