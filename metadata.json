@@ -1,0 +1,6 @@
+{
+  "name": "BMW M5 CS — Engineered for the Apex",
+  "description": "The most powerful BMW 5 Series of all time — 627 hp twin-turbo V8, 70 kg lighter than the M5 Competition, sharpened on the Nürburgring. Scroll through a cinematic 3D studio inspection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
