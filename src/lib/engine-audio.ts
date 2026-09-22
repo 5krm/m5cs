@@ -30,6 +30,18 @@ class V8EngineAudio {
     return this.isRunning
   }
 
+  /**
+   * Live engine speed derived from the sub oscillator's automated frequency
+   * (42 Hz ≈ 800 rpm idle → 190 Hz ≈ 3 600 rpm… scaled so a full rev reads
+   * as ~6 800 rpm on the cockpit tachometer). 0 when the engine is off.
+   */
+  public get rpm(): number {
+    if (!this.isRunning || !this.oscSub) return 0
+    const f = this.oscSub.frequency.value
+    const norm = (f - 42) / (190 - 42) // 0 idle → 1 peak
+    return Math.max(0, Math.min(7200, 800 + norm * 6000))
+  }
+
   public start() {
     this.initContext()
     if (!this.ctx || this.isRunning) return

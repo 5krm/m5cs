@@ -184,3 +184,82 @@ export const HOTSPOTS: HotspotInfo[] = [
     cameraTarget: [-1.9, 0.55, 0],
   },
 ]
+
+/* ══════════════════════════════════════════════════════════════════════
+ * Location scenes — the car stays put, the world around it changes
+ * ══════════════════════════════════════════════════════════════════════ */
+
+export type SceneId = 'studio' | 'nurburgring' | 'garage' | 'alpine'
+
+export interface SceneInfo {
+  id: SceneId
+  name: string
+  tagline: string
+  /** small swatch gradient used in the dock */
+  swatch: string
+}
+
+export const SCENES: SceneInfo[] = [
+  { id: 'studio', name: 'Studio', tagline: 'Infinity cove · softbox rig', swatch: 'linear-gradient(135deg,#2a2f3a,#0b0d12)' },
+  { id: 'nurburgring', name: 'Nürburgring', tagline: 'Pit lane · dusk', swatch: 'linear-gradient(180deg,#1a1d45 0%,#d8703e 60%,#2b2b30 61%)' },
+  { id: 'garage', name: 'Munich Garage', tagline: 'Underground · P2', swatch: 'linear-gradient(180deg,#1a1c20,#3a3d44 55%,#6b6d70)' },
+  { id: 'alpine', name: 'Alpine Pass', tagline: 'Golden hour · 2,100 m', swatch: 'linear-gradient(180deg,#4f86c6 0%,#f4d6a4 55%,#4e6070 56%,#3f4a2c)' },
+]
+
+/* ══════════════════════════════════════════════════════════════════════
+ * X-Ray technical specification — counted up while the car is scanned
+ * ══════════════════════════════════════════════════════════════════════ */
+
+export interface SpecStat {
+  id: string
+  label: string
+  value: number
+  unit: string
+  decimals?: number
+  /** normalized bar length shown under the number (visual weight only) */
+  bar: number
+}
+
+export const SPEC_STATS: SpecStat[] = [
+  { id: 'power', label: 'Power', value: 627, unit: 'hp', bar: 0.92 },
+  { id: 'torque', label: 'Torque', value: 750, unit: 'Nm', bar: 0.86 },
+  { id: 'sprint', label: '0–100 km/h', value: 3.0, unit: 's', decimals: 1, bar: 0.34 },
+  { id: 'vmax', label: 'Top speed', value: 305, unit: 'km/h', bar: 0.98 },
+  { id: 'weight', label: 'Kerb weight (DIN)', value: 1825, unit: 'kg', bar: 0.58 },
+  { id: 'displacement', label: 'Displacement', value: 4395, unit: 'cc', bar: 0.66 },
+]
+
+/* ══════════════════════════════════════════════════════════════════════
+ * Cockpit mode — driver's-eye view, M modes, anchored callouts
+ * ══════════════════════════════════════════════════════════════════════ */
+
+export type MMode = 'road' | 'm1' | 'm2'
+
+export interface CockpitCallout {
+  id: string
+  label: string
+  sublabel: string
+  /** car-local anchor (nose = +X, driver side = −Z, ground = y 0) */
+  localPos: [number, number, number]
+}
+
+export const COCKPIT_CALLOUTS: CockpitCallout[] = [
+  {
+    id: 'wheel',
+    label: 'M Alcantara Steering Wheel',
+    sublabel: 'Red 12 o\u2019clock marker · carbon shift paddles',
+    localPos: [0.37, 0.93, -0.36],
+  },
+  {
+    id: 'seat',
+    label: 'M Carbon Bucket Seats',
+    sublabel: '\u221210 kg each · illuminated CS badge · Merino leather',
+    localPos: [0.05, 0.98, 0.36],
+  },
+  {
+    id: 'console',
+    label: 'M1 / M2 Setup Buttons',
+    sublabel: 'Two stored setups · Nürburgring-tuned MDM',
+    localPos: [0.34, 0.80, -0.04],
+  },
+]

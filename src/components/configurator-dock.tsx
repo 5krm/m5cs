@@ -5,7 +5,9 @@ import { Eye, EyeOff } from 'lucide-react'
 import {
   StudioTheme,
   PaintFinish,
+  SceneId,
   PAINT_CONFIGS,
+  SCENES,
 } from '@/types/configurator'
 import { v8Audio } from '@/lib/engine-audio'
 
@@ -20,11 +22,15 @@ interface ConfiguratorDockProps {
   onToggleCarbonHood: () => void
   orbitMode: boolean
   onToggleOrbit: () => void
+  sceneId: SceneId
+  onSceneChange: (id: SceneId) => void
+  cockpitMode: boolean
+  onToggleCockpit: () => void
   showText?: boolean
   onToggleText?: () => void
 }
 
-type Tab = 'paint' | 'studio'
+type Tab = 'paint' | 'studio' | 'scene'
 
 export default function ConfiguratorDock({
   theme,
@@ -37,6 +43,10 @@ export default function ConfiguratorDock({
   onToggleCarbonHood,
   orbitMode,
   onToggleOrbit,
+  sceneId,
+  onSceneChange,
+  cockpitMode,
+  onToggleCockpit,
   showText = true,
   onToggleText,
 }: ConfiguratorDockProps) {
@@ -115,6 +125,41 @@ export default function ConfiguratorDock({
                           minHeight: '24px',
                         }}
                       />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Location Scenes Tray */}
+          {openTab === 'scene' && (
+            <div className="flex flex-col items-center gap-2.5">
+              <span className="text-[11px] font-medium tracking-wide text-white/90">
+                {SCENES.find((sc) => sc.id === sceneId)?.name} · <span className="text-white/55">{SCENES.find((sc) => sc.id === sceneId)?.tagline}</span>
+              </span>
+              <div className="flex items-center gap-2">
+                {SCENES.map((sc) => {
+                  const isSel = sceneId === sc.id
+                  return (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      onClick={() => onSceneChange(sc.id)}
+                      title={`${sc.name} — ${sc.tagline}`}
+                      aria-label={sc.name}
+                      aria-pressed={isSel}
+                      className={`group flex flex-col items-center gap-1.5 rounded-xl border px-2 py-1.5 transition-all cursor-pointer ${
+                        isSel
+                          ? 'border-white bg-white/10 scale-105'
+                          : 'border-white/10 bg-white/5 opacity-75 hover:opacity-100 hover:border-white/30'
+                      }`}
+                    >
+                      <span
+                        className="block h-9 w-14 rounded-md border border-white/20 shadow-md"
+                        style={{ background: sc.swatch }}
+                      />
+                      <span className={`text-[10px] font-medium ${isSel ? 'text-white' : 'text-white/70'}`}>{sc.name}</span>
                     </button>
                   )
                 })}
@@ -209,7 +254,7 @@ export default function ConfiguratorDock({
       {/* ── Main Dock Navigation Bar (Minimalist BMW M Bar) ── */}
       <nav
         aria-label="Vehicle Controls Dock"
-        className="flex items-center gap-1.5 rounded-full border border-white/20 bg-[#080a0f]/90 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-xl text-white text-[12px]"
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/20 bg-[#080a0f]/90 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-xl text-white text-[12px]"
       >
         {/* Paint Trigger */}
         <button
@@ -250,8 +295,46 @@ export default function ConfiguratorDock({
           <span className="hidden sm:inline">Studio</span>
         </button>
 
+        {/* Location Trigger */}
+        <button
+          type="button"
+          onClick={() => toggleTab('scene')}
+          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+            openTab === 'scene'
+              ? 'bg-white text-black font-semibold'
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+          title="Change location"
+        >
+          <span
+            className="inline-block shrink-0 rounded-[3px] border border-white/40 shadow-sm"
+            style={{ background: SCENES.find((sc) => sc.id === sceneId)?.swatch, width: '16px', height: '11px' }}
+          />
+          <span className="hidden sm:inline">Location</span>
+        </button>
+
         {/* Divider */}
         <div className="h-4 w-px bg-white/20 mx-0.5" />
+
+        {/* Cockpit — "Get in" */}
+        <button
+          type="button"
+          onClick={onToggleCockpit}
+          className={`flex items-center gap-1 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+            cockpitMode
+              ? 'bg-[#E4002B] text-white font-semibold shadow-md shadow-[#E4002B]/40'
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+          title={cockpitMode ? 'Get out of the car' : 'Get in — driver’s-eye cockpit view'}
+          aria-pressed={cockpitMode}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="2.5" />
+            <path d="M12 3v6.5M4.5 15.5l5.3-2.2M19.5 15.5l-5.3-2.2" />
+          </svg>
+          <span className="hidden sm:inline">{cockpitMode ? 'Get out' : 'Get in'}</span>
+        </button>
 
         {/* 360° Free Orbit Mode Toggle */}
         <button
