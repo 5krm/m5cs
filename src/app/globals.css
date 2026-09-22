@@ -145,3 +145,49 @@ html {
 .cta-btn:active {
   transform: translateY(0);
 }
+
+/* ── X-Ray spec panel: horizontal scan-line that tracks the 3D sweep ── */
+.xray-panel::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: var(--scan, 0%);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(127, 211, 255, 0.9), transparent);
+  box-shadow: 0 0 14px 2px rgba(127, 211, 255, 0.45);
+  pointer-events: none;
+}
+.xray-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(127, 211, 255, 0.05) 0 1px,
+    transparent 1px 4px
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.xray-badge {
+  animation: xray-blink 1.1s steps(2, end) infinite;
+}
+@keyframes xray-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xray-badge {
+    animation: none;
+  }
+}
+
+/* Immersive modes (360° orbit / cockpit): the scroll-driven copy layers are
+ * animated with inline opacity by GSAP, so a class alone cannot hide them —
+ * this wins over the inline style and disables their hit-testing. */
+main[data-immersive='true'] [data-scroll-copy] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}

@@ -11,10 +11,12 @@
  *
  *   progress   camera move                          overlay
  *   ─────────────────────────────────────────────────────────────────────
- *   0.00–0.30  HERO → FRONT   wide drift pose →    hero copy fades out
+ *   0.00–0.24  HERO → FRONT   wide drift pose →    hero copy fades out
  *                             low, tight nose      front caption in/out
- *   0.42–0.72  FRONT → REAR   sweep along flank    rear caption in/out
- *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
+ *   0.34–0.56  FRONT → REAR   sweep along flank    rear caption in/out
+ *   0.66–0.78  REAR → XRAY    high side profile,   car turns into a wireframe
+ *                             scan-line sweep      "X-ray", spec counters tick up
+ *   0.88–1.00  XRAY → OUTRO   pull back wide       closing card fades in
  *
  * Backdrop: a procedural 3D showroom — cyclorama wall with panel seams and a
  * warm horizon glow, overhead softbox strips, distant light pillars (with
@@ -28,7 +30,7 @@
  * fades once the model parses (min 0.8 s hold so it never flashes).
  *
  * The "pinned viewport" is a fixed full-viewport stage (canvas + UI
- * overlay) driven by an invisible 440vh scroll track — functionally a
+ * overlay) driven by an invisible 560vh scroll track — functionally a
  * ScrollTrigger pin, but perfectly jitter-free with Lenis on every browser.
  */
 
@@ -47,11 +49,18 @@ import {
   PaintFinish,
   WheelFinish,
   CaliperColor,
+  SceneId,
+  MMode,
   PAINT_CONFIGS,
   WHEEL_CONFIGS,
   CALIPER_CONFIGS,
+  SPEC_STATS,
+  COCKPIT_CALLOUTS,
 } from '@/types/configurator'
 import ConfiguratorDock from '@/components/configurator-dock'
+import { v8Audio } from '@/lib/engine-audio'
+import CockpitOverlay from '@/components/cockpit-overlay'
+import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/location-scenes'
 
 export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
 export { PAINT_CONFIGS, WHEEL_CONFIGS, CALIPER_CONFIGS }
@@ -84,6 +93,9 @@ type CamKey = {
   /** portrait only: multiplies the lateral (z) camera offset again so the
    *  close-ups read more head-on — keeps the car flank out of the frame */
   mobileHeadOn?: number
+  /** portrait only: a completely separate pose (used when scaling the
+   *  desktop offset would not frame the subject sensibly) */
+  mobile?: { pos: Vec3; target: Vec3 }
 }
 
 const KEYS = {
@@ -93,6 +105,16 @@ const KEYS = {
   front: { pos: [4.4, 0.5, 2.1], target: [2.0, 0.52, 0], mobileF: 2.15, mobileHeadOn: 0.45 },
   /** state 2 — rear taillights, diffuser and exhaust, same-side sweep */
   rear: { pos: [-4.3, 0.9, 2.2], target: [-1.9, 0.68, 0], mobileF: 2.0, mobileHeadOn: 0.45 },
+  /** state 3 — X-ray: elevated broadside so the whole chassis fits the frame
+   *  while the spec panel sits on the right */
+  xray: {
+    pos: [-0.1, 2.0, 7.9],
+    target: [0.95, 0.6, 0],
+    mobileF: 1.55,
+    // portrait: broadside from further out, car pushed into the top half
+    // so the spec strip along the bottom never covers it
+    mobile: { pos: [0.3, 2.4, 10.2], target: [0.2, -0.9, 0] },
+  },
   /** closing wide elevated rear 3/4 for the end card */
   outro: { pos: [-6.9, 3.1, 7.2], target: [0, 0.55, 0], mobileF: 1.35 },
 } satisfies Record<string, CamKey>
@@ -522,7 +544,31 @@ type CarRig = {
   setCaliperColor: (color: CaliperColor) => void
   setCarbonHood: (carbon: boolean) => void
   setPaintColor: (paint: PaintFinish) => void
+  /** 0 = normal paint, 1 = full wireframe X-ray (body shell fades to a
+   *  translucent blue-print, drivetrain + chassis stay lit) */
+  setXray: (amount: number) => void
+  /** cockpit mode: hides the body shell / glass that would sit between the
+   *  driver's-eye camera and the interior, and paints the cluster red */
+  setCockpit: (active: boolean, mode: MMode) => void
+  /** driver's-eye position in car-local space */
+  cockpitEye: THREE.Vector3
 }
+
+/* Materials that belong to the drivetrain / chassis — they stay solid during
+ * the X-ray so the car reads as "skin removed", not "car removed". */
+const XRAY_KEEP = /^(Engineblock|Chassis|Meshesrotor|Hubr|Meshestires|Misca0021|RoundedRectangle|60galFuelTank)/
+/* Interior + cabin materials — solid during X-ray, and the ONLY meshes left
+ * fully visible while sitting in the cockpit. */
+const CABIN = /^(Interior|Seats|Steeringwheel|Needle|Miscdash|Miscseatbelts|Meshpart|Part|VehicleMobilePhoneHolder|LicensePlate1Mtl|Misca1Mtl|Miscb1Mtl|Miscdoorr1Mtl)/
+/* Dashboard cluster / dials — get an emissive M-mode tint in the cockpit */
+const CLUSTER = /^(Needle|Miscdash)/
+/* Dash clutter shipped with the source model (a cartoon figurine and a
+ * phone cradle + its bracket parts) — not M5 CS equipment, always hidden. */
+const CLUTTER = /^(Minion|VehicleMobilePhoneHolder|Meshpart|Part1Mtl)/
+/* Anything tiny (< 20 cm) perched on the dash top at the phone-mount spot
+ * (car-local x≈0.55, y≈1.0) is part of that same clutter — caught by
+ * position so renamed sub-parts never slip through. */
+const CLUTTER_ZONE = { x: [0.42, 0.72], y: [0.9, 1.12], z: [-0.3, -0.05], maxSize: 0.2 }
 
 function makeCarbonFiberTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
@@ -545,6 +591,16 @@ function makeCarbonFiberTexture(): THREE.CanvasTexture {
   tex.repeat.set(24, 24)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
+}
+
+function inClutterZone(mesh: THREE.Mesh): boolean {
+  // mesh is already scaled/positioned inside the normalized model group
+  const b = new THREE.Box3().setFromObject(mesh)
+  const size = b.getSize(new THREE.Vector3())
+  if (Math.max(size.x, size.y, size.z) > CLUTTER_ZONE.maxSize) return false
+  const c = b.getCenter(new THREE.Vector3())
+  const Z = CLUTTER_ZONE
+  return c.x > Z.x[0] && c.x < Z.x[1] && c.y > Z.y[0] && c.y < Z.y[1] && c.z > Z.z[0] && c.z < Z.z[1]
 }
 
 /**
@@ -615,11 +671,29 @@ function buildCarRig(
   const glass = darkGlass()
   const junk: THREE.Object3D[] = []
   const bonnetMeshes: THREE.Mesh[] = []
+  /** every mesh + the material it wears in the normal (non X-ray) state */
+  const allMeshes: Array<{ mesh: THREE.Mesh; kind: 'shell' | 'keep' | 'cabin' | 'glass' }> = []
 
   model.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     obj.castShadow = true
     obj.receiveShadow = false
+    {
+      const firstMat = Array.isArray(obj.material) ? obj.material[0] : obj.material
+      const n = firstMat?.name ?? ''
+      if (CLUTTER.test(n) || inClutterZone(obj)) {
+        obj.visible = false
+        return
+      }
+      const kind: 'shell' | 'keep' | 'cabin' | 'glass' = GLASS.has(n)
+        ? 'glass'
+        : XRAY_KEEP.test(n)
+        ? 'keep'
+        : CABIN.test(n)
+        ? 'cabin'
+        : 'shell'
+      allMeshes.push({ mesh: obj, kind })
+    }
 
     // Identify interactive parts
     if (obj.name === 'Object_4' || obj.name === 'Object_5') {
@@ -659,6 +733,138 @@ function buildCarRig(
     if (b.max.y - b.min.y < 0.12 && b.max.x - b.min.x > 3 && b.max.z - b.min.z > 3) junk.push(obj)
   })
   junk.forEach((m) => (m.visible = false))
+
+  /* ── X-ray: body shell → translucent wire "blueprint" ─────────────── */
+  const xrayWire = new THREE.MeshBasicMaterial({
+    color: 0x7fd3ff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  })
+  const xrayGhost = new THREE.MeshBasicMaterial({
+    color: 0x1f6fa8,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  })
+  const keepEmissive = new THREE.Color(0xff7a2a)
+  const keepMats = new Set<THREE.MeshStandardMaterial>()
+  const originalEmissive = new Map<THREE.MeshStandardMaterial, { c: THREE.Color; i: number }>()
+  for (const { mesh, kind } of allMeshes) {
+    if (kind !== 'keep') continue
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const m of mats) {
+      const std = m as THREE.MeshStandardMaterial
+      if (!std.isMeshStandardMaterial) continue
+      if (!keepMats.has(std)) {
+        keepMats.add(std)
+        originalEmissive.set(std, { c: std.emissive.clone(), i: std.emissiveIntensity })
+      }
+    }
+  }
+  const shellOriginal = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>()
+  /** shell meshes get a second, wireframe copy drawn over the (fading) paint */
+  const wireClones: THREE.Mesh[] = []
+  for (const { mesh, kind } of allMeshes) {
+    if (kind !== 'shell' && kind !== 'glass') continue
+    shellOriginal.set(mesh, mesh.material)
+    const clone = new THREE.Mesh(mesh.geometry, xrayWire)
+    clone.visible = false
+    clone.renderOrder = 5
+    clone.castShadow = false
+    clone.frustumCulled = mesh.frustumCulled
+    mesh.add(clone) // inherits the exact transform
+    wireClones.push(clone)
+  }
+  let xrayLevel = 0
+  let cockpitActive = false
+  const setXray = (amount: number) => {
+    const a = Math.min(1, Math.max(0, amount))
+    if (Math.abs(a - xrayLevel) < 0.002) return
+    xrayLevel = a
+    const on = a > 0.001
+    xrayWire.opacity = 0.42 * a
+    xrayGhost.opacity = 0.08 * a
+    for (const clone of wireClones) clone.visible = on
+    for (const { mesh, kind } of allMeshes) {
+      if (kind === 'shell' || kind === 'glass') {
+        if (cockpitActive) continue
+        // paint fades out over the first 60 % of the scan, wire fades in
+        const orig = shellOriginal.get(mesh)!
+        if (a > 0.6) {
+          mesh.material = xrayGhost
+          mesh.castShadow = false
+        } else {
+          mesh.material = orig
+          mesh.castShadow = true
+          const mats = Array.isArray(orig) ? orig : [orig]
+          for (const m of mats) {
+            m.transparent = a > 0
+            m.opacity = 1 - a / 0.6
+            m.depthWrite = a === 0
+            m.needsUpdate = false
+          }
+        }
+      }
+    }
+    for (const std of keepMats) {
+      const o = originalEmissive.get(std)!
+      std.emissive.copy(o.c).lerp(keepEmissive, a)
+      std.emissiveIntensity = o.i + a * 0.55
+    }
+  }
+
+  /* ── Cockpit: hide the shell so the camera can sit inside ─────────── */
+  const clusterMats = new Set<THREE.MeshStandardMaterial>()
+  const clusterOriginal = new Map<THREE.MeshStandardMaterial, { c: THREE.Color; i: number }>()
+  for (const { mesh } of allMeshes) {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const m of mats) {
+      const std = m as THREE.MeshStandardMaterial
+      if (!std.isMeshStandardMaterial || !CLUSTER.test(std.name ?? '')) continue
+      if (!clusterMats.has(std)) {
+        clusterMats.add(std)
+        clusterOriginal.set(std, { c: std.emissive.clone(), i: std.emissiveIntensity })
+      }
+    }
+  }
+  const M_TINT: Record<MMode, { color: number; intensity: number }> = {
+    road: { color: 0x6fb4ff, intensity: 0.28 },
+    m1: { color: 0xe01818, intensity: 0.6 },
+    m2: { color: 0xff5a00, intensity: 0.7 },
+  }
+  const setCockpit = (active: boolean, mode: MMode) => {
+    cockpitActive = active
+    for (const { mesh, kind } of allMeshes) {
+      if (kind === 'shell' || kind === 'glass') {
+        // in the cockpit the roof/pillars/glass are culled from the inside
+        // via FrontSide, so the interior stays framed by real bodywork
+        mesh.visible = true
+        if (kind === 'glass') mesh.visible = !active
+      }
+    }
+    for (const std of clusterMats) {
+      const o = clusterOriginal.get(std)!
+      if (active) {
+        std.emissive.setHex(M_TINT[mode].color)
+        std.emissiveIntensity = M_TINT[mode].intensity
+      } else {
+        std.emissive.copy(o.c)
+        std.emissiveIntensity = o.i
+      }
+    }
+  }
+
+  // Driver's eye — measured offline from the decoded GLB: steering wheel rim
+  // centre (0.37, 0.77, −0.36), seat back at x≈−0.15. Eye sits behind the
+  // wheel at head height on the driver side.
+  const cockpitEye = new THREE.Vector3(-0.06, 1.0, -0.36)
 
   const setHoodOpen = (_open: boolean) => {}
   const setDoorOpen = (_open: boolean) => {}
@@ -715,6 +921,9 @@ function buildCarRig(
     setCaliperColor,
     setCarbonHood,
     setPaintColor,
+    setXray,
+    setCockpit,
+    cockpitEye,
   }
 }
 
@@ -766,9 +975,26 @@ function detectWheelHubs(root: THREE.Object3D, size: THREE.Vector3): Array<[numb
 
 type FlatKey = { px: number; py: number; pz: number; tx: number; ty: number; tz: number }
 
+/** 0 → 1 "scan" amount over the X-ray dwell. The camera parks on the
+ *  broadside at P.xrayIn; the wireframe reveal + spec counters run from
+ *  there to P.xrayScanEnd and hold until the outro pull-back begins
+ *  (fading back out over the first part of the outro). */
+function xrayAmount(p: number): number {
+  const inT = (p - P.xrayIn) / (P.xrayScanEnd - P.xrayIn)
+  const outT = (p - P.outroStart) / 0.06
+  const a = Math.min(1, Math.max(0, inT))
+  const b = 1 - Math.min(1, Math.max(0, outT))
+  return Math.min(a, b)
+}
+
 /** Flatten a keyframe; on portrait screens the pos→target offset is
  *  scaled by mobileF so the car never clips out of the narrow viewport. */
 function flattenKey(k: CamKey, mobile: boolean): FlatKey {
+  if (mobile && k.mobile) {
+    const [px, py, pz] = k.mobile.pos
+    const [tx, ty, tz] = k.mobile.target
+    return { px, py, pz, tx, ty, tz }
+  }
   let [px, py, pz] = k.pos
   const [tx, ty, tz] = k.target
   if (mobile) {
@@ -787,8 +1013,21 @@ const NAV_ITEMS = [
   { id: 'overview', label: 'Overview' },
   { id: 'performance', label: 'Performance' },
   { id: 'design', label: 'Design' },
+  { id: 'xray', label: 'X-Ray' },
   { id: 'specs', label: 'Specs' },
 ] as const
+
+/* ── Scroll-progress map (must match buildTimeline below) ─────────────── */
+const P = {
+  frontIn: 0.24, // camera reaches the front pose
+  rearStart: 0.34,
+  rearIn: 0.56,
+  xrayStart: 0.66,
+  xrayIn: 0.78, // camera parked on the broadside — scan begins
+  xrayScanEnd: 0.88, // wireframe fully revealed, counters at 100 %
+  outroStart: 0.88,
+  outroIn: 1.0,
+} as const
 
 type SectionId = (typeof NAV_ITEMS)[number]['id']
 
@@ -831,7 +1070,10 @@ export default function ScrollExperience() {
   const heroLayerRef = useRef<HTMLDivElement>(null)
   const capFrontRef = useRef<HTMLDivElement>(null)
   const capRearRef = useRef<HTMLDivElement>(null)
+  const xrayPanelRef = useRef<HTMLDivElement>(null)
+  const xrayScanRef = useRef<HTMLDivElement>(null)
   const endCardRef = useRef<HTMLDivElement>(null)
+  const xrayProgressRef = useRef(0)
 
   const [theme, setTheme] = useState<StudioTheme>('apex')
   const [highBeams, setHighBeams] = useState(true)
@@ -846,6 +1088,11 @@ export default function ScrollExperience() {
   const [scrollProgress, setScrollProgress] = useState(0)
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
+  const [sceneId, setSceneId] = useState<SceneId>('studio')
+  const [cockpitMode, setCockpitMode] = useState(false)
+  const [mMode, setMMode] = useState<MMode>('road')
+  const [rpm, setRpm] = useState(0)
+  const [xrayValues, setXrayValues] = useState<number[]>(() => SPEC_STATS.map(() => 0))
 
   const lenisInstanceRef = useRef<Lenis | null>(null)
   const updateThemeRef = useRef<((t: StudioTheme, hb: boolean) => void) | null>(null)
@@ -856,6 +1103,9 @@ export default function ScrollExperience() {
   const toggleHoodRef = useRef<((open: boolean) => void) | null>(null)
   const toggleDoorRef = useRef<((open: boolean) => void) | null>(null)
   const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
+  const setSceneRef = useRef<((id: SceneId) => void) | null>(null)
+  const toggleCockpitRef = useRef<((active: boolean, mode: MMode) => void) | null>(null)
+  const setMModeRef = useRef<((mode: MMode) => void) | null>(null)
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
 
   const scrollToSection = useCallback((section: SectionId) => {
@@ -864,9 +1114,10 @@ export default function ScrollExperience() {
     const maxScroll = track.offsetHeight - window.innerHeight
     let target = 0
     if (section === 'overview') target = 0
-    else if (section === 'performance') target = maxScroll * 0.32
-    else if (section === 'design') target = maxScroll * 0.65
-    else if (section === 'specs') target = maxScroll * 0.98
+    else if (section === 'performance') target = maxScroll * 0.27
+    else if (section === 'design') target = maxScroll * 0.59
+    else if (section === 'xray') target = maxScroll * 0.86
+    else if (section === 'specs') target = maxScroll * 0.99
 
     if (lenisInstanceRef.current) {
       lenisInstanceRef.current.scrollTo(target, { duration: 1.2 })
@@ -928,11 +1179,86 @@ export default function ScrollExperience() {
   }, [])
 
   const handleOrbitToggle = useCallback(() => {
+    setCockpitMode(false)
+    toggleCockpitRef.current?.(false, mMode)
     setOrbitMode((prev) => {
       const next = !prev
       toggleOrbitRef.current?.(next)
       return next
     })
+  }, [mMode])
+
+  const handleSceneChange = useCallback((id: SceneId) => {
+    setSceneId(id)
+    setSceneRef.current?.(id)
+  }, [])
+
+  const handleCockpitToggle = useCallback(() => {
+    setCockpitMode((prev) => {
+      const next = !prev
+      if (next) {
+        setOrbitMode(false)
+        toggleOrbitRef.current?.(false)
+      }
+      toggleCockpitRef.current?.(next, mMode)
+      return next
+    })
+  }, [mMode])
+
+  const handleMModeChange = useCallback((mode: MMode) => {
+    setMMode(mode)
+    setMModeRef.current?.(mode)
+  }, [])
+
+  /* Live tachometer while sitting in the cockpit — polls the synth's
+   * automated oscillator frequency (cheap: one getter per frame). */
+  useEffect(() => {
+    if (!cockpitMode) return
+    let raf = 0
+    let last = -1
+    const loop = () => {
+      const r = Math.round(v8Audio.rpm / 25) * 25
+      if (r !== last) {
+        last = r
+        setRpm(r)
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => {
+      cancelAnimationFrame(raf)
+      // reset the needle when leaving the seat (runs in cleanup, not the body)
+      requestAnimationFrame(() => setRpm(0))
+    }
+  }, [cockpitMode])
+
+  /* Spec counters — driven from the scrubbed X-ray progress at ~30 Hz so the
+   * React re-render cost stays trivial while the numbers still feel live. */
+  useEffect(() => {
+    let raf = 0
+    let lastShown = -1
+    let lastTs = 0
+    const loop = (ts: number) => {
+      raf = requestAnimationFrame(loop)
+      if (ts - lastTs < 33) return
+      lastTs = ts
+      const a = xrayProgressRef.current
+      const atEnd = a >= 0.999 && lastShown < 0.999
+      if (!atEnd && Math.abs(a - lastShown) < 0.004) return
+      lastShown = a
+      // each stat starts a little later than the previous one (stagger)
+      setXrayValues(
+        SPEC_STATS.map((stat, i) => {
+          const start = i * 0.08
+          const t = Math.min(1, Math.max(0, (a - start) / (1 - start)))
+          if (t >= 0.9) return stat.value // snap early — never show 1,824 for 1,825
+          const eased = 1 - Math.pow(1 - t, 3)
+          return stat.value * eased
+        }),
+      )
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   useEffect(() => {
@@ -942,13 +1268,17 @@ export default function ScrollExperience() {
     const capFront = capFrontRef.current
     const capRear = capRearRef.current
     const endCard = endCardRef.current
+    const xrayPanel = xrayPanelRef.current
+    const xrayScan = xrayScanRef.current
     if (
       !canvas ||
       !track ||
       !heroLayer ||
       !capFront ||
       !capRear ||
-      !endCard
+      !endCard ||
+      !xrayPanel ||
+      !xrayScan
     )
       return
 
@@ -1013,7 +1343,14 @@ export default function ScrollExperience() {
     rim.position.set(-8, 5, -6)
     scene.add(rim)
 
-    scene.add(new THREE.HemisphereLight(0x39404e, 0x0b0c10, 0.42)) // studio ambience
+    const hemi = new THREE.HemisphereLight(0x39404e, 0x0b0c10, 0.42) // studio ambience
+    scene.add(hemi)
+
+    /* Everything that IS the studio (canopy, cyclorama, pylons, shaft, dust,
+     * floor, pool) lives in this group so a location swap can hide it in one
+     * call and bring it back untouched. */
+    const studio = new THREE.Group()
+    scene.add(studio)
 
     /* ── Suspended architectural luminaire canopy (Next-Level Overhead Studio) ──
      * A structural floating truss system with high-output emissive diffuser panels,
@@ -1021,7 +1358,7 @@ export default function ScrollExperience() {
      * and high-tension steel suspension cables vanishing into the ceiling fog. */
     const canopyGroup = new THREE.Group()
     canopyGroup.position.set(0, 5.35, 0)
-    scene.add(canopyGroup)
+    studio.add(canopyGroup)
 
     const diffuserMat = new THREE.MeshBasicMaterial({ color: 0xffeedb, side: THREE.DoubleSide })
     const outerFrameMat = new THREE.MeshStandardMaterial({ color: 0x0c0e14, metalness: 0.9, roughness: 0.25 })
@@ -1072,7 +1409,7 @@ export default function ScrollExperience() {
       new THREE.MeshBasicMaterial({ map: makeCycloramaTexture('apex'), side: THREE.BackSide }),
     )
     cyclorama.position.y = 12
-    scene.add(cyclorama)
+    studio.add(cyclorama)
 
     /* ── Distant illuminated architectural column pylons ──────────────────────── */
     const pillarBodyMat = new THREE.MeshStandardMaterial({ color: 0x11131a, metalness: 0.7, roughness: 0.3 })
@@ -1099,13 +1436,13 @@ export default function ScrollExperience() {
       led.position.set(0, 0, 0.095)
       pGroup.add(led)
 
-      scene.add(pGroup)
+      studio.add(pGroup)
 
       // Reflected pylon below floor
       if (window.innerWidth >= 768) {
         const mirrorPGroup = pGroup.clone()
         mirrorPGroup.position.set(px, -ph / 2, pz)
-        scene.add(mirrorPGroup)
+        studio.add(mirrorPGroup)
       }
     }
 
@@ -1126,7 +1463,7 @@ export default function ScrollExperience() {
       )
       shaft.position.set(0, 2.68, 0)
       shaft.renderOrder = 2
-      scene.add(shaft)
+      studio.add(shaft)
 
       const DUST_COUNT = 200
       const dustBase = new Float32Array(DUST_COUNT * 3)
@@ -1157,7 +1494,7 @@ export default function ScrollExperience() {
         }),
       )
       dust.renderOrder = 3
-      scene.add(dust)
+      studio.add(dust)
       if (!prefersReduced) {
         updateDust = (t) => {
           const attr = dustGeo.attributes.position
@@ -1190,7 +1527,7 @@ export default function ScrollExperience() {
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
-    scene.add(floor)
+    studio.add(floor)
 
     const poolTex = makeFloorPoolTexture('apex')
     const pool = new THREE.Mesh(
@@ -1205,7 +1542,59 @@ export default function ScrollExperience() {
     )
     pool.rotation.x = -Math.PI / 2
     pool.position.y = 0.01
-    scene.add(pool)
+    studio.add(pool)
+
+    /* ── X-ray scan plane — a thin vertical light sheet that sweeps the
+     *    length of the car while the shell dissolves into wireframe ──── */
+    const scanTex = (() => {
+      const c = document.createElement('canvas')
+      c.width = 64
+      c.height = 256
+      const ctx = c.getContext('2d')!
+      const g = ctx.createLinearGradient(0, 0, 64, 0)
+      g.addColorStop(0, 'rgba(120,210,255,0)')
+      g.addColorStop(0.5, 'rgba(180,235,255,1)')
+      g.addColorStop(1, 'rgba(120,210,255,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, 64, 256)
+      const t = new THREE.CanvasTexture(c)
+      t.colorSpace = THREE.SRGBColorSpace
+      return t
+    })()
+    const scanPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, 1.9),
+      new THREE.MeshBasicMaterial({
+        map: scanTex,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+      }),
+    )
+    scanPlane.rotation.y = Math.PI / 2 // faces ±X → sweeps along the car
+    scanPlane.position.set(0, 0.85, 0)
+    scanPlane.renderOrder = 6
+    scanPlane.visible = false
+    scene.add(scanPlane)
+    // floor echo of the scan line
+    const scanFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.3, 3.2),
+      new THREE.MeshBasicMaterial({
+        map: scanTex,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    )
+    scanFloor.rotation.x = -Math.PI / 2
+    scanFloor.position.y = 0.02
+    scanFloor.renderOrder = 6
+    scanFloor.visible = false
+    scene.add(scanFloor)
 
     /* ── Car root + contact shadows + dynamic automotive projections ─ */
     const carGroup = new THREE.Group()
@@ -1258,10 +1647,17 @@ export default function ScrollExperience() {
     carGroup.add(contact)
 
     /* ── Real-Time Theme Transition Handler ────────────────────────── */
+    let currentTheme: StudioTheme = 'apex'
+    let currentHighBeams = true
+    let activeLocation: LocationScene | null = null
+    let studioBackdrop: THREE.Texture = backdropTex
     const applyTheme = (t: StudioTheme, hb: boolean) => {
-      backdropTex.dispose()
+      currentTheme = t
+      currentHighBeams = hb
+      studioBackdrop.dispose()
       const newBackdrop = makeStudioBackdropTexture(t)
-      scene.background = newBackdrop
+      studioBackdrop = newBackdrop
+      if (!activeLocation) scene.background = newBackdrop
 
       const curCyMap = (cyclorama.material as THREE.MeshBasicMaterial).map
       curCyMap?.dispose()
@@ -1279,33 +1675,129 @@ export default function ScrollExperience() {
       ;(pool.material as THREE.MeshBasicMaterial).needsUpdate = true
 
       if (t === 'm') {
-        key.color.setHex(0xeaf5ff)
-        rim.color.setHex(0x009ada)
         diffuserMat.color.setHex(0xd0e8ff)
         wingMat.color.setHex(0x009ada)
       } else if (t === 'night') {
-        key.color.setHex(0xd0e6ff)
-        rim.color.setHex(0x2860a8)
         diffuserMat.color.setHex(0xc0ddff)
         wingMat.color.setHex(0x89cff0)
       } else {
-        key.color.setHex(0xfff1dd)
-        rim.color.setHex(0xbfd0e8)
         diffuserMat.color.setHex(0xffeedb)
         wingMat.color.setHex(0xffeedb)
+      }
+      if (!activeLocation) {
+        if (t === 'm') {
+          key.color.setHex(0xeaf5ff)
+          rim.color.setHex(0x009ada)
+        } else if (t === 'night') {
+          key.color.setHex(0xd0e6ff)
+          rim.color.setHex(0x2860a8)
+        } else {
+          key.color.setHex(0xfff1dd)
+          rim.color.setHex(0xbfd0e8)
+        }
       }
 
       headlightBeam.material.map?.dispose()
       headlightBeam.material.map = makeHeadlightProjectionTexture(t)
-      headlightBeam.material.opacity = hb ? 0.85 : 0.15
       headlightBeam.material.needsUpdate = true
-
-      taillightBeam.material.opacity = hb ? 0.75 : 0.15
-      taillightBeam.material.needsUpdate = true
+      applyBeams()
     }
     updateThemeRef.current = applyTheme
 
+    const applyBeams = () => {
+      const scale = activeLocation ? activeLocation.lighting.beamScale : 1
+      headlightBeam.material.opacity = (currentHighBeams ? 0.85 : 0.15) * scale
+      taillightBeam.material.opacity = (currentHighBeams ? 0.75 : 0.15) * scale
+    }
+
+    /* ── Location switcher ─────────────────────────────────────────────
+     * The car, its contact shadows and the shared 3-light rig stay; the
+     * studio group is hidden and a procedural environment takes its place.
+     * Light colours / intensities / fog / exposure are tweened so the swap
+     * reads as a cut-with-crossfade rather than a hard pop. */
+    let mirrorRigRef: THREE.Object3D | null = null
+    const lightTweens: gsap.core.Tween[] = []
+    const applyLighting = (L: LocationLighting, instant = false) => {
+      for (const tw of lightTweens) tw.kill()
+      lightTweens.length = 0
+      const d = instant ? 0 : 0.9
+      const ease = 'power2.inOut'
+      const fog = scene.fog as THREE.FogExp2
+      const kc = new THREE.Color(L.key.color)
+      const rc = new THREE.Color(L.rim.color)
+      const hs = new THREE.Color(L.hemi.sky)
+      const hg = new THREE.Color(L.hemi.ground)
+      const fc = new THREE.Color(L.fog.color)
+      lightTweens.push(
+        gsap.to(key.color, { r: kc.r, g: kc.g, b: kc.b, duration: d, ease }),
+        gsap.to(key, { intensity: L.key.intensity, duration: d, ease }),
+        gsap.to(key.position, { x: L.key.position[0], y: L.key.position[1], z: L.key.position[2], duration: d, ease }),
+        gsap.to(rim.color, { r: rc.r, g: rc.g, b: rc.b, duration: d, ease }),
+        gsap.to(rim, { intensity: L.rim.intensity, duration: d, ease }),
+        gsap.to(rim.position, { x: L.rim.position[0], y: L.rim.position[1], z: L.rim.position[2], duration: d, ease }),
+        gsap.to(hemi.color, { r: hs.r, g: hs.g, b: hs.b, duration: d, ease }),
+        gsap.to(hemi.groundColor, { r: hg.r, g: hg.g, b: hg.b, duration: d, ease }),
+        gsap.to(hemi, { intensity: L.hemi.intensity, duration: d, ease }),
+        gsap.to(fog.color, { r: fc.r, g: fc.g, b: fc.b, duration: d, ease }),
+        gsap.to(fog, { density: L.fog.density, duration: d, ease }),
+        gsap.to(renderer, { toneMappingExposure: L.exposure, duration: d, ease }),
+        gsap.to(scene, { environmentIntensity: L.environmentIntensity, duration: d, ease }),
+      )
+    }
+    const setLocation = (id: SceneId) => {
+      if ((activeLocation?.id ?? 'studio') === id) return
+      if (activeLocation) {
+        scene.remove(activeLocation.group)
+        activeLocation.dispose()
+        activeLocation = null
+      }
+      const mobile = window.innerWidth < 768
+      let next: LocationScene | null = null
+      try {
+        next = buildLocationScene(id, { mobile })
+      } catch (err) {
+        console.warn('[scroll-experience] location build failed, staying in the studio:', err)
+        next = null
+      }
+      activeLocation = next
+      studio.visible = !next
+      if (next) {
+        scene.add(next.group)
+        scene.background = next.background
+        applyLighting(next.lighting)
+        if (mirrorRigRef) mirrorRigRef.visible = next.lighting.floorReflection
+      } else {
+        scene.background = studioBackdrop
+        applyLighting(STUDIO_LIGHTING)
+        if (mirrorRigRef) mirrorRigRef.visible = true
+        applyTheme(currentTheme, currentHighBeams) // restores theme-tinted key/rim
+      }
+      applyBeams()
+      // let the new environment settle in from black
+      gsap.fromTo(canvas, { opacity: 0.15 }, { opacity: 1, duration: 0.7, ease: 'power2.out' })
+    }
+    setSceneRef.current = setLocation
+
     let carRig: CarRig | null = null
+
+    const cockpitState = {
+      active: false,
+      mode: 'road' as MMode,
+      /** 0 → 1 transition (outside → seated) */
+      t: 0,
+      yaw: 0.08, // look slightly right toward the centre console
+      pitch: -0.08,
+      targetYaw: 0.08,
+      targetPitch: -0.08,
+      isDragging: false,
+      lastX: 0,
+      lastY: 0,
+      // world-space snapshot of where the camera was when we got in
+      fromPos: new THREE.Vector3(),
+      fromLook: new THREE.Vector3(),
+      // through-the-window waypoint (world space)
+      via: new THREE.Vector3(),
+    }
 
     const applyPaint = (finish: PaintFinish) => {
       const cfg = PAINT_CONFIGS[finish]
@@ -1383,6 +1875,10 @@ export default function ScrollExperience() {
         toggleDoorRef.current = (open: boolean) => {
           carRig?.setDoorOpen(open)
         }
+        setMModeRef.current = (mode: MMode) => {
+          cockpitState.mode = mode
+          if (cockpitState.active) carRig?.setCockpit(true, mode)
+        }
 
         // Measure + detect BEFORE parenting: Box3.setFromObject() works in
         // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
@@ -1441,9 +1937,14 @@ export default function ScrollExperience() {
             obj.material = Array.isArray(obj.material) ? mats : mats[0]
           })
           carGroup.add(mirrorRig.car)
+          mirrorRigRef = mirrorRig.car
+          mirrorRig.car.visible = (activeLocation as LocationScene | null)?.lighting.floorReflection ?? true
         }
 
         gsap.to(carRig!.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
+        // the user may have scrolled into the X-ray band before the model landed
+        carRig!.setXray(xrayProgressRef.current)
+        if (cockpitState.active) carRig!.setCockpit(true, cockpitState.mode)
       } catch (err) {
         console.warn('[scroll-experience] car model failed to load:', err)
       }
@@ -1451,6 +1952,7 @@ export default function ScrollExperience() {
 
     /* ── Camera rig state — animated by GSAP or Orbit Drag ─────────── */
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
+    let frameDt = 1 / 60 // seconds since last tick (set in tick)
 
     let isOrbitActive = false
 
@@ -1464,6 +1966,58 @@ export default function ScrollExperience() {
       isDragging: false,
       lastX: 0,
       lastY: 0,
+    }
+
+    /* ── Cockpit ("Get in") — camera flies through the driver's window to
+     *    the eye point, then drag looks around from a fixed head position ── */
+    let cockpitTween: gsap.core.Tween | null = null
+    const calloutEls = new Map<string, HTMLElement>()
+    for (const c of COCKPIT_CALLOUTS) {
+      const el = document.getElementById(`cockpit-callout-${c.id}`)
+      if (el) calloutEls.set(c.id, el)
+    }
+    let calloutsShown = false
+    const cockpitEyeWorld = new THREE.Vector3()
+    const cockpitLookWorld = new THREE.Vector3()
+    const tmpV = new THREE.Vector3()
+    const tmpA = new THREE.Vector3()
+    const tmpB = new THREE.Vector3()
+    const curveOut = new THREE.Vector3()
+
+    toggleCockpitRef.current = (active: boolean, mode: MMode) => {
+      cockpitState.mode = mode
+      if (active === cockpitState.active) {
+        if (active) carRig?.setCockpit(true, mode)
+        return
+      }
+      cockpitState.active = active
+      cockpitTween?.kill()
+      if (active) {
+        cockpitState.fromPos.copy(camera.position)
+        camera.getWorldDirection(tmpV)
+        cockpitState.fromLook.copy(camera.position).addScaledVector(tmpV, 4)
+        // driver's door waypoint: 1.6 m out from the B-pillar on the driver side
+        cockpitState.via.set(0.15, 1.15, -2.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), BASE_YAW)
+        cockpitState.targetYaw = 0.08
+        cockpitState.targetPitch = -0.08
+        cockpitState.yaw = 0.55 // start looking toward the wheel as we slide in
+        cockpitState.pitch = -0.2
+        carRig?.setCockpit(true, mode)
+        camera.near = 0.03
+        camera.updateProjectionMatrix()
+        cockpitTween = gsap.to(cockpitState, { t: 1, duration: 1.7, ease: 'power3.inOut' })
+      } else {
+        cockpitTween = gsap.to(cockpitState, {
+          t: 0,
+          duration: 1.2,
+          ease: 'power3.inOut',
+          onComplete: () => {
+            carRig?.setCockpit(false, mode)
+            camera.near = 0.1
+            camera.updateProjectionMatrix()
+          },
+        })
+      }
     }
 
     toggleOrbitRef.current = (active: boolean) => {
@@ -1482,6 +2036,12 @@ export default function ScrollExperience() {
     }
 
     const onPointerDown = (e: PointerEvent) => {
+      if (cockpitState.active) {
+        cockpitState.isDragging = true
+        cockpitState.lastX = e.clientX
+        cockpitState.lastY = e.clientY
+        return
+      }
       if (!isOrbitActive) return
       orbitState.isDragging = true
       orbitState.lastX = e.clientX
@@ -1489,6 +2049,16 @@ export default function ScrollExperience() {
     }
 
     const onPointerMove = (e: PointerEvent) => {
+      if (cockpitState.active && cockpitState.isDragging) {
+        const dx = e.clientX - cockpitState.lastX
+        const dy = e.clientY - cockpitState.lastY
+        // drag right → look right (natural "turn your head" mapping)
+        cockpitState.targetYaw = Math.max(-1.2, Math.min(1.35, cockpitState.targetYaw + dx * 0.0042))
+        cockpitState.targetPitch = Math.max(-0.7, Math.min(0.45, cockpitState.targetPitch - dy * 0.0036))
+        cockpitState.lastX = e.clientX
+        cockpitState.lastY = e.clientY
+        return
+      }
       if (isOrbitActive && orbitState.isDragging) {
         const dx = e.clientX - orbitState.lastX
         const dy = e.clientY - orbitState.lastY
@@ -1501,6 +2071,7 @@ export default function ScrollExperience() {
 
     const onPointerUp = () => {
       orbitState.isDragging = false
+      cockpitState.isDragging = false
     }
 
     const onWheel = (e: WheelEvent) => {
@@ -1514,6 +2085,40 @@ export default function ScrollExperience() {
     canvas.addEventListener('wheel', onWheel, { passive: true })
 
     const applyCamera = () => {
+      if (cockpitState.active || cockpitState.t > 0.0005) {
+        // eye + look in world space (car-local → yawed carGroup)
+        const eye = carRig?.cockpitEye ?? tmpA.set(-0.18, 1.02, -0.36)
+        cockpitEyeWorld.copy(eye).applyAxisAngle(tmpB.set(0, 1, 0), BASE_YAW)
+        const k = 1 - Math.exp(-frameDt * 7) // ≈ 0.11 per frame at 60 fps, fps-independent
+        cockpitState.yaw += (cockpitState.targetYaw - cockpitState.yaw) * k
+        cockpitState.pitch += (cockpitState.targetPitch - cockpitState.pitch) * k
+        // forward = +X in car space; yaw rotates toward −Z (right) for positive
+        const cy = Math.cos(cockpitState.pitch)
+        tmpV.set(Math.cos(cockpitState.yaw) * cy, Math.sin(cockpitState.pitch), -Math.sin(cockpitState.yaw) * cy)
+        tmpV.applyAxisAngle(tmpB.set(0, 1, 0), BASE_YAW)
+        cockpitLookWorld.copy(cockpitEyeWorld).addScaledVector(tmpV, 3)
+
+        const t = cockpitState.t
+        // quadratic bezier from the outside pose, through the driver's
+        // window, into the seat — keeps the camera from cutting through the roof
+        const u = 1 - t
+        curveOut
+          .copy(cockpitState.fromPos)
+          .multiplyScalar(u * u)
+          .addScaledVector(cockpitState.via, 2 * u * t)
+          .addScaledVector(cockpitEyeWorld, t * t)
+        tmpA.copy(cockpitState.fromLook).lerp(cockpitLookWorld, t * t * (3 - 2 * t))
+        camera.position.copy(curveOut)
+        camera.lookAt(tmpA)
+        // FOV widens a touch inside so the dash + door card both fit
+        const baseFov = window.innerWidth < 768 ? FOV_MOBILE : FOV_DESKTOP
+        const fov = baseFov + (72 - baseFov) * t
+        if (Math.abs(camera.fov - fov) > 0.05) {
+          camera.fov = fov
+          camera.updateProjectionMatrix()
+        }
+        return
+      }
       if (isOrbitActive) {
         orbitState.theta += (orbitState.targetTheta - orbitState.theta) * 0.08
         orbitState.phi += (orbitState.targetPhi - orbitState.phi) * 0.08
@@ -1553,6 +2158,7 @@ export default function ScrollExperience() {
         hero: flattenKey(KEYS.hero, mobile),
         front: flattenKey(KEYS.front, mobile),
         rear: flattenKey(KEYS.rear, mobile),
+        xray: flattenKey(KEYS.xray, mobile),
         outro: flattenKey(KEYS.outro, mobile),
       }
       // hard-reset the rig to the hero pose so scrubbing always starts
@@ -1570,37 +2176,52 @@ export default function ScrollExperience() {
           onUpdate: (self) => {
             const p = self.progress
             setScrollProgress(p)
-            if (p < 0.2) {
+            if (p < 0.17) {
               setActiveSection('overview')
-            } else if (p < 0.5) {
+            } else if (p < 0.45) {
               setActiveSection('performance')
-            } else if (p < 0.8) {
+            } else if (p < 0.7) {
               setActiveSection('design')
+            } else if (p < 0.92) {
+              setActiveSection('xray')
             } else {
               setActiveSection('specs')
             }
+            xrayProgressRef.current = xrayAmount(p)
           },
         },
       })
 
-      /* Act I — HERO → FRONT (0 → 0.30) */
-      tl.to(cam, { ...K.front, duration: 0.3 }, 0)
-      tl.to(heroLayer, { autoAlpha: 0, y: -36, duration: 0.12, ease: 'power1.in' }, 0.02)
-      tl.fromTo(capFront, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.09, ease: 'power2.out' }, 0.15)
-      tl.to(capFront, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.08, ease: 'power1.in' }, 0.38)
+      /* Act I — HERO → FRONT (0 → 0.24) */
+      tl.to(cam, { ...K.front, duration: P.frontIn }, 0)
+      tl.to(heroLayer, { autoAlpha: 0, y: -36, duration: 0.1, ease: 'power1.in' }, 0.02)
+      tl.fromTo(capFront, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.07, ease: 'power2.out' }, 0.12)
+      tl.to(capFront, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.06, ease: 'power1.in' }, 0.31)
 
-      /* dwell on the front bumper (0.30 → 0.42) — no camera tweens */
+      /* dwell on the front bumper (0.24 → 0.34) — no camera tweens */
 
-      /* Act II — FRONT → REAR (0.42 → 0.72) */
-      tl.to(cam, { ...K.rear, duration: 0.3 }, 0.42)
-      tl.fromTo(capRear, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.09, ease: 'power2.out' }, 0.54)
-      tl.to(capRear, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.08, ease: 'power1.in' }, 0.78)
+      /* Act II — FRONT → REAR (0.34 → 0.56) */
+      tl.to(cam, { ...K.rear, duration: P.rearIn - P.rearStart }, P.rearStart)
+      tl.fromTo(capRear, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.07, ease: 'power2.out' }, 0.44)
+      tl.to(capRear, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.06, ease: 'power1.in' }, 0.62)
 
-      /* dwell on the rear (0.72 → 0.84) */
+      /* dwell on the rear (0.56 → 0.66) */
 
-      /* Act III — REAR → OUTRO (0.84 → 1.00) + closing card */
-      tl.to(cam, { ...K.outro, duration: 0.16 }, 0.84)
-      tl.fromTo(endCard, { autoAlpha: 0, y: 28, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.1, ease: 'power2.out' }, 0.87)
+      /* Act III — REAR → X-RAY (0.66 → 0.78): rise to the broadside, then
+       * the scan runs 0.78 → 0.88 (driven per-frame from xrayAmount so the
+       * three.js material swap and the DOM counters share one clock) */
+      tl.to(cam, { ...K.xray, duration: P.xrayIn - P.xrayStart }, P.xrayStart)
+      tl.fromTo(
+        xrayPanel,
+        { autoAlpha: 0, x: 40 },
+        { autoAlpha: 1, x: 0, duration: 0.05, ease: 'power2.out' },
+        P.xrayIn - 0.01,
+      )
+      tl.to(xrayPanel, { autoAlpha: 0, x: 24, duration: 0.05, ease: 'power1.in' }, P.outroStart + 0.02)
+
+      /* Act IV — X-RAY → OUTRO (0.88 → 1.00) + closing card */
+      tl.to(cam, { ...K.outro, duration: P.outroIn - P.outroStart }, P.outroStart)
+      tl.fromTo(endCard, { autoAlpha: 0, y: 28, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.08, ease: 'power2.out' }, 0.92)
 
       return tl
     }
@@ -1632,10 +2253,54 @@ export default function ScrollExperience() {
       lenisInstanceRef.current = lenis
     }
 
-    const tick = (time: number) => {
+    const tick = (time: number, deltaMs: number) => {
+      frameDt = Math.min(0.1, Math.max(0.001, deltaMs / 1000))
       lenis?.raf(time * 1000)
       applyCamera()
       updateDust?.(time)
+      activeLocation?.update?.(time)
+
+      // X-ray: one clock for the wireframe dissolve, the scan sheet and the
+      // DOM counters (which read the same ref on their own RAF).
+      const xa = cockpitState.active ? 0 : xrayProgressRef.current
+      carRig?.setXray(xa)
+      const scanOn = xa > 0.001 && xa < 0.999
+      scanPlane.visible = scanOn
+      scanFloor.visible = scanOn
+      if (scanOn) {
+        // nose → tail sweep over the reveal, with a soft fade at both ends
+        const sx = 2.5 - xa * 5.0
+        const fade = Math.min(1, xa * 8, (1 - xa) * 8)
+        scanPlane.position.x = sx
+        scanFloor.position.x = sx
+        ;(scanPlane.material as THREE.MeshBasicMaterial).opacity = 0.85 * fade
+        ;(scanFloor.material as THREE.MeshBasicMaterial).opacity = 0.35 * fade
+        xrayScan.style.setProperty('--scan', `${(xa * 100).toFixed(1)}%`)
+      }
+
+      // Cockpit call-outs: project car-local anchors to CSS pixels. Only
+      // the ones in front of the camera and inside the frame are shown.
+      if (cockpitState.t > 0.5) {
+        const w = window.innerWidth
+        const h = window.innerHeight
+        for (const c of COCKPIT_CALLOUTS) {
+          const el = calloutEls.get(c.id)
+          if (!el) continue
+          tmpV.set(c.localPos[0], c.localPos[1], c.localPos[2]).applyAxisAngle(tmpB.set(0, 1, 0), BASE_YAW)
+          tmpV.project(camera)
+          const inFront = tmpV.z < 1
+          const x = (tmpV.x * 0.5 + 0.5) * w
+          const y = (-tmpV.y * 0.5 + 0.5) * h
+          const inside = inFront && x > 24 && x < w - 220 && y > 120 && y < h - 150
+          const fade = Math.max(0, Math.min(1, (cockpitState.t - 0.7) / 0.3))
+          el.style.opacity = inside ? String(fade) : '0'
+          el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
+        }
+      } else if (calloutsShown) {
+        for (const el of calloutEls.values()) el.style.opacity = '0'
+      }
+      calloutsShown = cockpitState.t > 0.5
+
       renderer.render(scene, camera)
     }
     gsap.ticker.add(tick)
@@ -1683,7 +2348,15 @@ export default function ScrollExperience() {
         if (Array.isArray(m)) m.forEach(disposeMat)
         else if (m) disposeMat(m)
       })
-      backdropTex.dispose()
+      for (const tw of lightTweens) tw.kill()
+      cockpitTween?.kill()
+      if (activeLocation) {
+        scene.remove(activeLocation.group)
+        activeLocation.dispose()
+        activeLocation = null
+      }
+      scanTex.dispose()
+      studioBackdrop.dispose()
       poolTex.dispose()
       envTex.dispose()
       pmrem.dispose()
@@ -1695,12 +2368,12 @@ export default function ScrollExperience() {
   /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
 
   return (
-    <main className="relative w-full bg-[#050608] text-[#f2efe7]">
+    <main className="relative w-full bg-[#050608] text-[#f2efe7]" data-immersive={orbitMode || cockpitMode ? 'true' : undefined}>
       {/*
-        Invisible scroll track — its height (440vh) is the scroll distance
+        Invisible scroll track — its height (560vh) is the scroll distance
         ScrollTrigger scrubs the camera timeline through. Fully reversible.
       */}
-      <div ref={trackRef} aria-hidden="true" className="h-[440vh]" />
+      <div ref={trackRef} aria-hidden="true" className="h-[560vh]" />
 
       {/* Fixed 3D stage */}
       <canvas
@@ -1775,8 +2448,9 @@ export default function ScrollExperience() {
         {/* ── Hero layer — fades out as the camera leaves the hero state ── */}
         <div
           ref={heroLayerRef}
+          data-scroll-copy=""
           className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${
-            orbitMode ? 'opacity-0 pointer-events-none' : ''
+            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
           }`}
         >
           {STAR_DOTS.map((dot) => (
@@ -1833,9 +2507,10 @@ export default function ScrollExperience() {
         {/* ── Stage caption: FRONT (right side on desktop) ── */}
         <div
           ref={capFrontRef}
+          data-scroll-copy=""
           style={{ opacity: 0 }}
           className={`absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[38%] sm:text-right transition-opacity duration-300 ${
-            orbitMode ? 'opacity-0 pointer-events-none' : ''
+            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
           }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">01 — Front Fascia</p>
@@ -1850,9 +2525,10 @@ export default function ScrollExperience() {
         {/* ── Stage caption: REAR (left side on desktop) ── */}
         <div
           ref={capRearRef}
+          data-scroll-copy=""
           style={{ opacity: 0 }}
           className={`absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[38%] transition-opacity duration-300 ${
-            orbitMode ? 'opacity-0 pointer-events-none' : ''
+            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
           }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">02 — Rear Profile</p>
@@ -1864,12 +2540,64 @@ export default function ScrollExperience() {
           </p>
         </div>
 
+        {/* ── X-Ray spec panel (right side; full-width strip on mobile) ── */}
+        <div
+          ref={xrayPanelRef}
+          data-scroll-copy=""
+          style={{ opacity: 0 }}
+          className={`absolute inset-x-4 bottom-[92px] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(20px,5vw,72px)] sm:top-1/2 sm:-translate-y-1/2 sm:w-[340px] transition-opacity duration-300 ${
+            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
+          }`}
+        >
+          <div
+            ref={xrayScanRef}
+            className="xray-panel relative overflow-hidden rounded-2xl border border-[#7fd3ff]/25 bg-[#050a12]/70 p-4 sm:p-5 backdrop-blur-md"
+            style={{ '--scan': '0%' } as CSSProperties}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.32em] text-[#7fd3ff]">03 — X-Ray</p>
+              <span className="xray-badge text-[10px] font-mono tracking-widest text-[#7fd3ff]/80">SCANNING</span>
+            </div>
+            <h2 className="m-0 mb-2 sm:mb-0 text-[clamp(16px,2.4vw,24px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
+              S63 TwinPower Turbo · CFRP shell
+            </h2>
+            <p className="m-0 mt-1 mb-3 sm:mb-4 hidden sm:block text-[12px] leading-relaxed text-white/50">
+              Bodywork stripped to the frame — what is left is the drivetrain that makes it the fastest M5.
+            </p>
+            <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-1 sm:gap-y-2.5">
+              {SPEC_STATS.map((stat, i) => {
+                const v = xrayValues[i] ?? 0
+                const shown = stat.decimals ? v.toFixed(stat.decimals) : Math.round(v).toLocaleString('en-US')
+                const pct = stat.value > 0 ? Math.min(1, v / stat.value) : 0
+                return (
+                  <div key={stat.id} className="min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <dt className="m-0 truncate text-[10px] uppercase tracking-[0.18em] text-white/45">{stat.label}</dt>
+                      <dd className="m-0 whitespace-nowrap font-mono text-[15px] sm:text-[17px] font-semibold tabular-nums text-white">
+                        {shown}
+                        <span className="ml-1 text-[10px] font-normal text-[#7fd3ff]/80">{stat.unit}</span>
+                      </dd>
+                    </div>
+                    <div className="mt-1 h-px w-full bg-white/10">
+                      <div
+                        className="h-px bg-gradient-to-r from-[#7fd3ff] to-[#7fd3ff]/20 transition-[width] duration-75"
+                        style={{ width: `${pct * stat.bar * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </dl>
+          </div>
+        </div>
+
         {/* ── Closing card ── */}
         <div
           ref={endCardRef}
+          data-scroll-copy=""
           style={{ opacity: 0 }}
           className={`absolute inset-0 flex flex-col items-center justify-center px-6 text-center transition-opacity duration-300 ${
-            orbitMode ? 'opacity-0 pointer-events-none' : ''
+            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
           }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.4em] text-[#e8ddc4]/80">BMW M5 CS</p>
@@ -1912,6 +2640,20 @@ export default function ScrollExperience() {
           onToggleCarbonHood={handleToggleCarbonHood}
           orbitMode={orbitMode}
           onToggleOrbit={handleOrbitToggle}
+          sceneId={sceneId}
+          onSceneChange={handleSceneChange}
+          cockpitMode={cockpitMode}
+          onToggleCockpit={handleCockpitToggle}
+        />
+
+        {/* ── Cockpit HUD — tacho, M-mode buttons, callouts ── */}
+        <CockpitOverlay
+          active={cockpitMode}
+          mode={mMode}
+          onModeChange={handleMModeChange}
+          onExit={handleCockpitToggle}
+          rpm={rpm}
+          callouts={COCKPIT_CALLOUTS}
         />
       </div>
 
