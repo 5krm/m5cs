@@ -234,3 +234,24 @@ Verification:
 Stage Summary:
 - Car reads parked and realistically grounded: real 2K cast shadow + body AO + 4 wheel contact patches; lighting back to the approved studio look; zero decorative circles.
 - Committed aa519d6 on main.
+
+---
+Task ID: 19
+Agent: Z.ai Code (main agent)
+Task: User screenshot follow-up — "fix the shadows its not realy under the car": the fake contact patches were floating outboard of the tires instead of sitting under them.
+
+Work Log:
+- Decoded the GLB offline in Node (meshoptimizer + matrix walk over all 98 anonymous meshes) to get ground truth: raw car ~19.26 units long, wheels merged into multi-tire meshes with misleading materials ("Meshestires", wheel covers under "door" material), so per-mesh box heuristics can never find hubs. Root -90°X rotation confirmed car length = X, width = Z in world space; wheelbase/length = 0.597 matches the real F90 M5 CS.
+- Root cause found: Box3.setFromObject(carRig.car) was called AFTER parenting into carGroup, which carries BASE_YAW (-0.14 rad) — world-space measurement inflated width 1.96 → 2.37 (+35%), placing patches at z=±1.02 vs the true track ±0.74 (≈0.3 m outboard of each tire). The fixed 5.61×2.58 body-AO ellipse also spilled far past the real footprint.
+- New detectWheelHubs(): vertices touching the ground (y < 6% of car height) are clustered by XZ quadrant; per-quadrant mean = wheel hub. Immune to mesh merging/misnaming; runs on the unparented rig so world == rig-local. Offline validation vs decoded geometry: detected (-1.272,±0.740)/(+1.475,±0.756) vs axle-true (-1.274,±0.739)/(+1.471,±0.739) — within 2 cm. M5-CS fraction fallback (±0.30 L, ±0.38 W on the LOCAL box) retained for degenerate models.
+- Patches (0.9×0.5, opacity 0.78) now placed at detected hubs; body-AO ellipse rebuilt post-load to the measured footprint (4.70×2.31); ellipse geometry disposed on swap.
+- agent-browser: stale v18/v18m sessions were starving CPU (SwiftShader) — killed all chrome procs; fresh v22 session, hero + jump-scrolled view verified: shadow hugs the body, patches centered under tires, no floating blobs, no rings.
+
+Verification:
+- bun run lint: 0 errors.
+- Node offline geometry validation (see above) — algorithm proven before runtime wiring.
+- Desktop 1280×800 fresh session 0 page errors; hero + scrolled front-side screenshots show grounded contact shadows from two camera angles.
+
+Stage Summary:
+- Contact shadows are now geometry-anchored: measured before yaw-parenting + per-vertex hub detection, so patches sit under the tires in every camera state for any model.
+- Committed on main (amended into "showroom v4" commit). GitHub push still blocked by token scopes; pivoting to GitLab per user.
