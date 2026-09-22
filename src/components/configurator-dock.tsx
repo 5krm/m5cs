@@ -1,0 +1,294 @@
+'use client'
+
+import React, { useState, useEffect } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
+import {
+  StudioTheme,
+  PaintFinish,
+  PAINT_CONFIGS,
+} from '@/types/configurator'
+import { v8Audio } from '@/lib/engine-audio'
+
+interface ConfiguratorDockProps {
+  theme: StudioTheme
+  onThemeChange: (t: StudioTheme) => void
+  highBeams: boolean
+  onToggleHighBeams: () => void
+  paint: PaintFinish
+  onPaintChange: (p: PaintFinish) => void
+  carbonHood: boolean
+  onToggleCarbonHood: () => void
+  orbitMode: boolean
+  onToggleOrbit: () => void
+  showText?: boolean
+  onToggleText?: () => void
+}
+
+type Tab = 'paint' | 'studio'
+
+export default function ConfiguratorDock({
+  theme,
+  onThemeChange,
+  highBeams,
+  onToggleHighBeams,
+  paint,
+  onPaintChange,
+  carbonHood,
+  onToggleCarbonHood,
+  orbitMode,
+  onToggleOrbit,
+  showText = true,
+  onToggleText,
+}: ConfiguratorDockProps) {
+  const [openTab, setOpenTab] = useState<Tab | null>(null)
+  const [engineStarted, setEngineStarted] = useState(false)
+  const [isRevving, setIsRevving] = useState(false)
+
+  const toggleTab = (tab: Tab) => {
+    setOpenTab((prev) => (prev === tab ? null : tab))
+  }
+
+  const handleStartEngine = () => {
+    if (engineStarted) {
+      v8Audio.stop()
+      setEngineStarted(false)
+    } else {
+      v8Audio.start()
+      setEngineStarted(true)
+    }
+  }
+
+  const handleRevEngine = () => {
+    v8Audio.rev()
+    setIsRevving(true)
+    if (!engineStarted) setEngineStarted(true)
+    setTimeout(() => setIsRevving(false), 900)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (v8Audio.running) {
+        v8Audio.stop()
+      }
+    }
+  }, [])
+
+  return (
+    <div className="pointer-events-auto fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center max-w-[95vw]">
+      {/* ── Compact Floating Selector Tray (Appears above the dock) ── */}
+      {openTab && (
+        <aside
+          aria-label="Customizer Options"
+          className="mb-2 w-auto max-w-[92vw] rounded-2xl border border-white/20 bg-[#080a0f]/95 px-4 py-2.5 text-white shadow-[0_12px_36px_rgba(0,0,0,0.8)] backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-150"
+        >
+          {/* Paint Swatches Tray */}
+          {openTab === 'paint' && (
+            <div className="flex flex-col items-center gap-2.5">
+              <span className="text-[11px] font-medium tracking-wide text-white/90">
+                {PAINT_CONFIGS[paint].name}
+              </span>
+              <div className="flex items-center gap-3">
+                {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((p) => {
+                  const cfg = PAINT_CONFIGS[p]
+                  const isSel = paint === p
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onPaintChange(p)}
+                      title={cfg.name}
+                      aria-label={cfg.name}
+                      className={`relative flex shrink-0 items-center justify-center rounded-full transition-all cursor-pointer p-0 ${
+                        isSel
+                          ? 'ring-2 ring-white ring-offset-2 ring-offset-[#080a0f] scale-110'
+                          : 'opacity-70 hover:opacity-100 hover:scale-105'
+                      }`}
+                      style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px' }}
+                    >
+                      <span
+                        className="block shrink-0 rounded-full border border-white/30 shadow-md"
+                        style={{
+                          backgroundColor: cfg.hex,
+                          width: '24px',
+                          height: '24px',
+                          minWidth: '24px',
+                          minHeight: '24px',
+                        }}
+                      />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Studio, Aero & Engine Sound Options Tray */}
+          {openTab === 'studio' && (
+            <div className="flex items-center gap-2 flex-wrap justify-center">
+              {/* Studio lighting modes */}
+              <div className="flex items-center gap-1 rounded-xl bg-white/5 p-1 border border-white/10">
+                {(
+                  [
+                    { id: 'apex', label: 'Apex' },
+                    { id: 'm', label: 'M Track' },
+                    { id: 'night', label: 'Night' },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onThemeChange(t.id)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
+                      theme === t.id
+                        ? 'bg-white text-black font-semibold shadow-sm'
+                        : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Laserlights toggle */}
+              <button
+                type="button"
+                onClick={onToggleHighBeams}
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
+                  highBeams
+                    ? 'border-[#E4002B] bg-[#E4002B]/20 text-[#E4002B]'
+                    : 'border-white/10 bg-white/5 text-white/60 hover:text-white'
+                }`}
+              >
+                <span>Laserlights</span>
+                <span className="text-[9px] uppercase">{highBeams ? 'ON' : 'OFF'}</span>
+              </button>
+
+              {/* Carbon hood toggle */}
+              <button
+                type="button"
+                onClick={onToggleCarbonHood}
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
+                  carbonHood
+                    ? 'border-white bg-white/20 text-white'
+                    : 'border-white/10 bg-white/5 text-white/60 hover:text-white'
+                }`}
+              >
+                <span>CFRP Hood</span>
+                <span className="text-[9px] uppercase">{carbonHood ? 'ON' : 'OFF'}</span>
+              </button>
+
+              {/* V8 Engine Start/Stop Audio */}
+              <button
+                type="button"
+                onClick={handleStartEngine}
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
+                  engineStarted
+                    ? 'border-[#E4002B] bg-[#E4002B]/20 text-[#E4002B]'
+                    : 'border-white/10 bg-white/5 text-white/60 hover:text-white'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${engineStarted ? 'bg-[#E4002B] animate-ping' : 'bg-white/50'}`} />
+                <span>{engineStarted ? 'Stop V8' : 'Start V8'}</span>
+              </button>
+
+              {/* V8 Rev Sound */}
+              <button
+                type="button"
+                onClick={handleRevEngine}
+                className={`flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/15 px-2.5 py-1 text-[11px] font-medium text-white transition-all active:scale-95 cursor-pointer ${
+                  isRevving ? 'ring-1 ring-[#009ADA]' : ''
+                }`}
+              >
+                <span>⚡ Rev</span>
+              </button>
+            </div>
+          )}
+        </aside>
+      )}
+
+      {/* ── Main Dock Navigation Bar (Minimalist BMW M Bar) ── */}
+      <nav
+        aria-label="Vehicle Controls Dock"
+        className="flex items-center gap-1.5 rounded-full border border-white/20 bg-[#080a0f]/90 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-xl text-white text-[12px]"
+      >
+        {/* Paint Trigger */}
+        <button
+          type="button"
+          onClick={() => toggleTab('paint')}
+          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+            openTab === 'paint'
+              ? 'bg-white text-black font-semibold'
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+          title="Customize Paint"
+        >
+          <span
+            className="inline-block shrink-0 rounded-full border border-white/40 shadow-sm"
+            style={{
+              backgroundColor: PAINT_CONFIGS[paint].hex,
+              width: '12px',
+              height: '12px',
+              minWidth: '12px',
+              minHeight: '12px',
+            }}
+          />
+          <span className="hidden sm:inline">Paint</span>
+        </button>
+
+        {/* Studio Lighting Trigger */}
+        <button
+          type="button"
+          onClick={() => toggleTab('studio')}
+          className={`flex items-center gap-1 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+            openTab === 'studio'
+              ? 'bg-white text-black font-semibold'
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+          title="Studio Atmosphere & Aero"
+        >
+          <span>✦</span>
+          <span className="hidden sm:inline">Studio</span>
+        </button>
+
+        {/* Divider */}
+        <div className="h-4 w-px bg-white/20 mx-0.5" />
+
+        {/* 360° Free Orbit Mode Toggle */}
+        <button
+          type="button"
+          onClick={onToggleOrbit}
+          className={`flex items-center gap-1 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+            orbitMode
+              ? 'bg-[#009ADA] text-white font-semibold shadow-md shadow-[#009ADA]/40'
+              : 'text-white/70 hover:text-white hover:bg-white/10'
+          }`}
+          title="Toggle 360° Free Camera Orbit"
+        >
+          <span>360°</span>
+        </button>
+
+        {/* Show / Hide Text Toggle */}
+        {onToggleText && (
+          <button
+            type="button"
+            onClick={onToggleText}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 transition-all cursor-pointer ${
+              !showText
+                ? 'bg-amber-400/20 text-amber-300 font-semibold border border-amber-400/35'
+                : 'text-white/70 hover:text-white hover:bg-white/10'
+            }`}
+            title={showText ? 'Hide on-screen text' : 'Show on-screen text'}
+            aria-label={showText ? 'Hide text' : 'Show text'}
+          >
+            {showText ? (
+              <EyeOff className="h-3 w-3" />
+            ) : (
+              <Eye className="h-3 w-3 text-amber-300" />
+            )}
+            <span className="hidden sm:inline">{showText ? 'Hide Text' : 'Show Text'}</span>
+          </button>
+        )}
+      </nav>
+    </div>
+  )
+}

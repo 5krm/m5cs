@@ -42,40 +42,19 @@ import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Lenis from 'lenis'
 import 'lenis/dist/lenis.css'
+import {
+  StudioTheme,
+  PaintFinish,
+  WheelFinish,
+  CaliperColor,
+  PAINT_CONFIGS,
+  WHEEL_CONFIGS,
+  CALIPER_CONFIGS,
+} from '@/types/configurator'
+import ConfiguratorDock from '@/components/configurator-dock'
 
-export type StudioTheme = 'apex' | 'm' | 'night'
-export type PaintFinish = 'frozen-deep-green' | 'brands-hatch-grey' | 'frozen-bluestone' | 'sapphire-black'
-
-export const PAINT_CONFIGS: Record<PaintFinish, { name: string; hex: string; roughness: number; metalness: number; clearcoat: number }> = {
-  'frozen-deep-green': {
-    name: 'Frozen Deep Green',
-    hex: '#183124',
-    roughness: 0.38,
-    metalness: 0.72,
-    clearcoat: 0.9,
-  },
-  'brands-hatch-grey': {
-    name: 'Brands Hatch Grey',
-    hex: '#69717a',
-    roughness: 0.34,
-    metalness: 0.82,
-    clearcoat: 1.0,
-  },
-  'frozen-bluestone': {
-    name: 'Frozen Bluestone',
-    hex: '#3f5060',
-    roughness: 0.36,
-    metalness: 0.8,
-    clearcoat: 0.95,
-  },
-  'sapphire-black': {
-    name: 'Black Sapphire',
-    hex: '#0d0f12',
-    roughness: 0.18,
-    metalness: 0.92,
-    clearcoat: 1.0,
-  },
-}
+export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
+export { PAINT_CONFIGS, WHEEL_CONFIGS, CALIPER_CONFIGS }
 
 /* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
 
@@ -537,15 +516,47 @@ const darkGlass = () =>
 type CarRig = {
   car: THREE.Group
   paintMaterials: THREE.MeshPhysicalMaterial[]
+  setHoodOpen: (open: boolean) => void
+  setDoorOpen: (open: boolean) => void
+  setWheelFinish: (finish: WheelFinish) => void
+  setCaliperColor: (color: CaliperColor) => void
+  setCarbonHood: (carbon: boolean) => void
+  setPaintColor: (paint: PaintFinish) => void
+}
+
+function makeCarbonFiberTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.fillStyle = '#101215'
+    ctx.fillRect(0, 0, 64, 64)
+    ctx.fillStyle = '#22252a'
+    ctx.fillRect(0, 0, 32, 32)
+    ctx.fillRect(32, 32, 32, 32)
+    ctx.fillStyle = '#181a1e'
+    ctx.fillRect(32, 0, 32, 32)
+    ctx.fillRect(0, 32, 32, 32)
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(24, 24)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
 }
 
 /**
- * Normalizes ANY car glTF so the camera keyframes above fit without
- * retuning: centers the footprint, grounds it at y = 0, scales the longest
- * horizontal span to TARGET_LENGTH, repaints body/glass, hides showroom
- * plates and enables shadows.
+ * Normalizes car glTF, creates articulation pivots for hood and doors,
+ * and sets up materials for wheels, carbon-ceramic calipers, and carbon fiber.
  */
-function buildCarRig(source: THREE.Object3D, initialPaint: PaintFinish = 'brands-hatch-grey'): CarRig {
+function buildCarRig(
+  source: THREE.Object3D,
+  initialPaint: PaintFinish = 'brands-hatch-grey',
+  initialWheel: WheelFinish = 'gold-bronze',
+  initialCaliper: CaliperColor = 'red'
+): CarRig {
   const model = source.clone(true)
 
   const box = new THREE.Box3().setFromObject(model)
@@ -555,6 +566,10 @@ function buildCarRig(source: THREE.Object3D, initialPaint: PaintFinish = 'brands
   model.scale.setScalar(scale)
   model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale)
   if (FLIP_MODEL) model.rotation.y = Math.PI
+
+  const car = new THREE.Group()
+  car.add(model)
+  car.updateMatrixWorld(true)
 
   const paintMaterials: THREE.MeshPhysicalMaterial[] = []
   const cfg = PAINT_CONFIGS[initialPaint]
@@ -567,12 +582,60 @@ function buildCarRig(source: THREE.Object3D, initialPaint: PaintFinish = 'brands
     envMapIntensity: 0.85,
   })
 
+  // Carbon fiber weave material
+  const carbonTex = makeCarbonFiberTexture()
+  const carbonMat = new THREE.MeshPhysicalMaterial({
+    map: carbonTex,
+    color: '#15171b',
+    roughness: 0.28,
+    metalness: 0.35,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.08,
+    envMapIntensity: 1.1,
+  })
+
+  // Custom wheels material
+  const wheelCfg = WHEEL_CONFIGS[initialWheel]
+  const wheelMat = new THREE.MeshStandardMaterial({
+    color: wheelCfg.hex,
+    metalness: wheelCfg.metalness,
+    roughness: wheelCfg.roughness,
+    envMapIntensity: 0.95,
+  })
+
+  // Custom brake calipers material
+  const caliperCfg = CALIPER_CONFIGS[initialCaliper]
+  const caliperMat = new THREE.MeshStandardMaterial({
+    color: caliperCfg.hex,
+    metalness: caliperCfg.metalness,
+    roughness: caliperCfg.roughness,
+    envMapIntensity: 0.9,
+  })
+
   const glass = darkGlass()
   const junk: THREE.Object3D[] = []
+  const bonnetMeshes: THREE.Mesh[] = []
+
   model.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     obj.castShadow = true
     obj.receiveShadow = false
+
+    // Identify interactive parts
+    if (obj.name === 'Object_4' || obj.name === 'Object_5') {
+      bonnetMeshes.push(obj)
+    } else if (obj.name === 'Object_73' || obj.name === 'Object_80' || obj.name === 'Object_66') {
+      obj.material = wheelMat
+      return
+    } else if (obj.name === 'Object_74') {
+      obj.material = caliperMat
+      return
+    } else if (obj.name === 'Object_44') {
+      // Carbon fiber roof
+      obj.material = carbonMat
+      return
+    }
+
     const mats = Array.isArray(obj.material) ? [...obj.material] : [obj.material]
     let replaced = false
     for (let i = 0; i < mats.length; i++) {
@@ -590,16 +653,69 @@ function buildCarRig(source: THREE.Object3D, initialPaint: PaintFinish = 'brands
       }
     }
     if (replaced) obj.material = Array.isArray(obj.material) ? mats : mats[0]
+
     // hide giant flat plates (Sketchfab showroom floors)
     const b = new THREE.Box3().setFromObject(obj)
     if (b.max.y - b.min.y < 0.12 && b.max.x - b.min.x > 3 && b.max.z - b.min.z > 3) junk.push(obj)
   })
   junk.forEach((m) => (m.visible = false))
 
-  const car = new THREE.Group()
-  car.add(model)
+  const setHoodOpen = (_open: boolean) => {}
+  const setDoorOpen = (_open: boolean) => {}
 
-  return { car, paintMaterials }
+  const setWheelFinish = (finish: WheelFinish) => {
+    const wCfg = WHEEL_CONFIGS[finish]
+    wheelMat.color.set(wCfg.hex)
+    wheelMat.metalness = wCfg.metalness
+    wheelMat.roughness = wCfg.roughness
+    wheelMat.needsUpdate = true
+  }
+
+  const setCaliperColor = (color: CaliperColor) => {
+    const cCfg = CALIPER_CONFIGS[color]
+    caliperMat.color.set(cCfg.hex)
+    caliperMat.metalness = cCfg.metalness
+    caliperMat.roughness = cCfg.roughness
+    caliperMat.needsUpdate = true
+  }
+
+  let isCarbonHoodExposed = false
+  const setCarbonHood = (carbon: boolean) => {
+    isCarbonHoodExposed = carbon
+    bonnetMeshes.forEach((mesh) => {
+      mesh.material = carbon ? carbonMat : basePaint
+    })
+  }
+
+  const setPaintColor = (p: PaintFinish) => {
+    const pCfg = PAINT_CONFIGS[p]
+    basePaint.color.set(pCfg.hex)
+    basePaint.metalness = pCfg.metalness
+    basePaint.roughness = pCfg.roughness
+    basePaint.clearcoat = pCfg.clearcoat
+    paintMaterials.forEach((m) => {
+      m.color.set(pCfg.hex)
+      m.metalness = pCfg.metalness
+      m.roughness = pCfg.roughness
+      m.clearcoat = pCfg.clearcoat
+    })
+    if (!isCarbonHoodExposed) {
+      bonnetMeshes.forEach((mesh) => {
+        mesh.material = basePaint
+      })
+    }
+  }
+
+  return {
+    car,
+    paintMaterials,
+    setHoodOpen,
+    setDoorOpen,
+    setWheelFinish,
+    setCaliperColor,
+    setCarbonHood,
+    setPaintColor,
+  }
 }
 
 /**
@@ -720,16 +836,25 @@ export default function ScrollExperience() {
   const [theme, setTheme] = useState<StudioTheme>('apex')
   const [highBeams, setHighBeams] = useState(true)
   const [paint, setPaint] = useState<PaintFinish>('brands-hatch-grey')
+  const [wheelFinish, setWheelFinish] = useState<WheelFinish>('gold-bronze')
+  const [caliperColor, setCaliperColor] = useState<CaliperColor>('red')
+  const [carbonHood, setCarbonHood] = useState(false)
+  const [hoodOpen, setHoodOpen] = useState(false)
+  const [doorOpen, setDoorOpen] = useState(false)
   const [orbitMode, setOrbitMode] = useState(false)
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
   const [scrollProgress, setScrollProgress] = useState(0)
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
-  const [showVehicleControls, setShowVehicleControls] = useState(false)
 
   const lenisInstanceRef = useRef<Lenis | null>(null)
   const updateThemeRef = useRef<((t: StudioTheme, hb: boolean) => void) | null>(null)
   const updatePaintRef = useRef<((p: PaintFinish) => void) | null>(null)
+  const updateWheelRef = useRef<((w: WheelFinish) => void) | null>(null)
+  const updateCaliperRef = useRef<((c: CaliperColor) => void) | null>(null)
+  const toggleCarbonHoodRef = useRef<((c: boolean) => void) | null>(null)
+  const toggleHoodRef = useRef<((open: boolean) => void) | null>(null)
+  const toggleDoorRef = useRef<((open: boolean) => void) | null>(null)
   const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
 
@@ -766,6 +891,40 @@ export default function ScrollExperience() {
   const handlePaintChange = useCallback((finish: PaintFinish) => {
     setPaint(finish)
     updatePaintRef.current?.(finish)
+  }, [])
+
+  const handleWheelChange = useCallback((finish: WheelFinish) => {
+    setWheelFinish(finish)
+    updateWheelRef.current?.(finish)
+  }, [])
+
+  const handleCaliperChange = useCallback((color: CaliperColor) => {
+    setCaliperColor(color)
+    updateCaliperRef.current?.(color)
+  }, [])
+
+  const handleToggleCarbonHood = useCallback(() => {
+    setCarbonHood((prev) => {
+      const next = !prev
+      toggleCarbonHoodRef.current?.(next)
+      return next
+    })
+  }, [])
+
+  const handleToggleHood = useCallback(() => {
+    setHoodOpen((prev) => {
+      const next = !prev
+      toggleHoodRef.current?.(next)
+      return next
+    })
+  }, [])
+
+  const handleToggleDoor = useCallback(() => {
+    setDoorOpen((prev) => {
+      const next = !prev
+      toggleDoorRef.current?.(next)
+      return next
+    })
   }, [])
 
   const handleOrbitToggle = useCallback(() => {
@@ -1204,7 +1363,26 @@ export default function ScrollExperience() {
         const gltf = await loader.parseAsync(arrayBuffer, '')
         if (disposed) return
 
-        carRig = buildCarRig(gltf.scene, paint)
+        carRig = buildCarRig(gltf.scene, paint, wheelFinish, caliperColor)
+
+        updatePaintRef.current = (newPaint: PaintFinish) => {
+          carRig?.setPaintColor(newPaint)
+        }
+        updateWheelRef.current = (newWheel: WheelFinish) => {
+          carRig?.setWheelFinish(newWheel)
+        }
+        updateCaliperRef.current = (newCaliper: CaliperColor) => {
+          carRig?.setCaliperColor(newCaliper)
+        }
+        toggleCarbonHoodRef.current = (carbon: boolean) => {
+          carRig?.setCarbonHood(carbon)
+        }
+        toggleHoodRef.current = (open: boolean) => {
+          carRig?.setHoodOpen(open)
+        }
+        toggleDoorRef.current = (open: boolean) => {
+          carRig?.setDoorOpen(open)
+        }
 
         // Measure + detect BEFORE parenting: Box3.setFromObject() works in
         // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
@@ -1275,6 +1453,7 @@ export default function ScrollExperience() {
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
 
     let isOrbitActive = false
+
     const orbitState = {
       theta: Math.PI * 0.28,
       phi: Math.PI * 0.38,
@@ -1594,7 +1773,12 @@ export default function ScrollExperience() {
         </header>
 
         {/* ── Hero layer — fades out as the camera leaves the hero state ── */}
-        <div ref={heroLayerRef} className="absolute inset-0 flex flex-col">
+        <div
+          ref={heroLayerRef}
+          className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${
+            orbitMode ? 'opacity-0 pointer-events-none' : ''
+          }`}
+        >
           {STAR_DOTS.map((dot) => (
             <span
               key={`${dot.top}-${dot.side}-${dot.offset}`}
@@ -1650,7 +1834,9 @@ export default function ScrollExperience() {
         <div
           ref={capFrontRef}
           style={{ opacity: 0 }}
-          className="absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[38%] sm:text-right"
+          className={`absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[38%] sm:text-right transition-opacity duration-300 ${
+            orbitMode ? 'opacity-0 pointer-events-none' : ''
+          }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">01 — Front Fascia</p>
           <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
@@ -1665,7 +1851,9 @@ export default function ScrollExperience() {
         <div
           ref={capRearRef}
           style={{ opacity: 0 }}
-          className="absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[38%]"
+          className={`absolute inset-x-5 bottom-28 max-w-[340px] [text-shadow:0_1px_14px_rgba(0,0,0,0.55)] sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[38%] transition-opacity duration-300 ${
+            orbitMode ? 'opacity-0 pointer-events-none' : ''
+          }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/80">02 — Rear Profile</p>
           <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold tracking-[-0.01em] text-[#f7f4ec]">
@@ -1680,7 +1868,9 @@ export default function ScrollExperience() {
         <div
           ref={endCardRef}
           style={{ opacity: 0 }}
-          className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center"
+          className={`absolute inset-0 flex flex-col items-center justify-center px-6 text-center transition-opacity duration-300 ${
+            orbitMode ? 'opacity-0 pointer-events-none' : ''
+          }`}
         >
           <p className="m-0 text-[11px] font-medium uppercase tracking-[0.4em] text-[#e8ddc4]/80">BMW M5 CS</p>
           <h2 className="m-0 mt-4 text-[clamp(24px,4.5vw,40px)] font-semibold tracking-[-0.02em] text-[#f7f4ec]">
@@ -1710,195 +1900,19 @@ export default function ScrollExperience() {
           </button>
         </div>
 
-        {/* ── Modern, understated automotive controls dock (hidden by default with toggle button) ── */}
-        {!showVehicleControls ? (
-          <>
-            {/* Desktop show button */}
-            <button
-              type="button"
-              onClick={() => setShowVehicleControls(true)}
-              className="pointer-events-auto absolute bottom-6 right-6 hidden sm:flex items-center gap-2.5 rounded-full border border-white/15 bg-[#080a0f]/80 hover:bg-[#080a0f]/95 hover:border-white/30 px-3.5 py-2 text-[12px] font-medium text-white/85 hover:text-white shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-md transition-all active:scale-95 cursor-pointer"
-              aria-label="Show vehicle paint and 360° controls"
-              title="Customize Paint & 360° View"
-            >
-              <span
-                className="h-3.5 w-3.5 rounded-full border border-white/30 shadow-sm"
-                style={{ backgroundColor: PAINT_CONFIGS[paint].hex }}
-              />
-              <span>Paint &amp; 360°</span>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-white/60"
-              >
-                <path d="m18 15-6-6-6 6" />
-              </svg>
-            </button>
-
-            {/* Mobile show button */}
-            <button
-              type="button"
-              onClick={() => setShowVehicleControls(true)}
-              className="pointer-events-auto absolute bottom-5 right-4 flex sm:hidden items-center gap-2 rounded-full border border-white/15 bg-[#080a0f]/90 px-3 py-1.5 text-[11px] font-medium text-white/80 shadow-lg backdrop-blur-md cursor-pointer"
-              title="Paint & 360°"
-              aria-label="Show vehicle controls"
-            >
-              <span
-                className="h-3 w-3 rounded-full border border-white/30"
-                style={{ backgroundColor: PAINT_CONFIGS[paint].hex }}
-              />
-              <span>Paint &amp; 360°</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m18 15-6-6-6 6" />
-              </svg>
-            </button>
-          </>
-        ) : (
-          <>
-            {/* Desktop controls dock */}
-            <aside
-              aria-label="Vehicle Controls and Finishes"
-              className="pointer-events-auto absolute bottom-6 right-6 hidden sm:flex items-center gap-4 rounded-full border border-white/15 bg-[#080a0f]/90 px-4 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-md animate-in fade-in duration-200"
-            >
-              {/* Paint Finish Selector */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">
-                  Paint
-                </span>
-                <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Exterior Paint Finish">
-                  {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((finish) => {
-                    const cfg = PAINT_CONFIGS[finish]
-                    const isSelected = paint === finish
-                    return (
-                      <button
-                        key={finish}
-                        type="button"
-                        onClick={() => handlePaintChange(finish)}
-                        title={cfg.name}
-                        aria-label={cfg.name}
-                        aria-checked={isSelected}
-                        role="radio"
-                        className={`relative flex h-5 w-5 items-center justify-center rounded-full transition-all cursor-pointer ${
-                          isSelected
-                            ? 'ring-1.5 ring-white ring-offset-2 ring-offset-[#080a0f]'
-                            : 'opacity-60 hover:opacity-100 hover:scale-110'
-                        }`}
-                      >
-                        <span
-                          className="h-full w-full rounded-full border border-white/20"
-                          style={{ backgroundColor: cfg.hex }}
-                        />
-                      </button>
-                    )
-                  })}
-                </div>
-                <span className="text-[11px] font-normal text-white/70 pl-0.5">
-                  {PAINT_CONFIGS[paint].name}
-                </span>
-              </div>
-
-              <div className="h-3.5 w-px bg-white/15" aria-hidden="true" />
-
-              {/* 360° Free Camera Toggle */}
-              <button
-                type="button"
-                onClick={handleOrbitToggle}
-                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium tracking-wide transition-all cursor-pointer ${
-                  orbitMode
-                    ? 'bg-white/20 text-white'
-                    : 'text-white/60 hover:text-white'
-                }`}
-                title="Toggle 360° free orbit inspection"
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                </svg>
-                <span>{orbitMode ? 'Exit 360°' : '360° View'}</span>
-              </button>
-
-              <div className="h-3.5 w-px bg-white/15" aria-hidden="true" />
-
-              {/* Hide / Close Button */}
-              <button
-                type="button"
-                onClick={() => setShowVehicleControls(false)}
-                className="rounded-full p-1 text-white/45 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                title="Hide controls"
-                aria-label="Hide controls"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </aside>
-
-            {/* Mobile controls bar */}
-            <aside
-              aria-label="Mobile Vehicle Controls"
-              className="pointer-events-auto absolute bottom-5 inset-x-4 flex sm:hidden items-center justify-between rounded-2xl border border-white/15 bg-[#080a0f]/95 px-3.5 py-2 shadow-xl backdrop-blur-md animate-in fade-in duration-200"
-            >
-              <div className="flex items-center gap-1.5">
-                {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((finish) => {
-                  const cfg = PAINT_CONFIGS[finish]
-                  const isSelected = paint === finish
-                  return (
-                    <button
-                      key={finish}
-                      type="button"
-                      onClick={() => handlePaintChange(finish)}
-                      title={cfg.name}
-                      aria-label={cfg.name}
-                      className={`h-5 w-5 rounded-full border border-white/20 transition-all ${
-                        isSelected ? 'ring-1.5 ring-white' : 'opacity-60'
-                      }`}
-                      style={{ backgroundColor: cfg.hex }}
-                    />
-                  )
-                })}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleOrbitToggle}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all ${
-                    orbitMode ? 'bg-white/20 text-white' : 'text-white/60'
-                  }`}
-                >
-                  {orbitMode ? 'Scroll' : '360°'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowVehicleControls(false)}
-                  className="rounded-full p-1 text-white/50 hover:text-white cursor-pointer"
-                  title="Hide"
-                  aria-label="Hide"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M18 6 6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </aside>
-          </>
-        )}
+        {/* ── Advanced Studio & Vehicle Configurator Dock ── */}
+        <ConfiguratorDock
+          theme={theme}
+          onThemeChange={handleThemeChange}
+          highBeams={highBeams}
+          onToggleHighBeams={toggleHighBeams}
+          paint={paint}
+          onPaintChange={handlePaintChange}
+          carbonHood={carbonHood}
+          onToggleCarbonHood={handleToggleCarbonHood}
+          orbitMode={orbitMode}
+          onToggleOrbit={handleOrbitToggle}
+        />
       </div>
 
       {/* ── Test Drive Reservation Modal ── */}
