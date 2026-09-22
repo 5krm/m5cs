@@ -189,3 +189,25 @@ Stage Summary:
 - Local main (db5f808) = complete, verified, push-ready: studio-v2 showroom + smoke-free car + 3.2MB meshopt model + loading screen + resize-fix.
 - Blocked ONLY on token permissions: needs Contents: Read and write + Pull requests: Read and write (fine-grained tokens keep the same token string when you edit permissions, so no resend needed once updated).
 - Push+PR plan staged: push main -> feature/studio-v2-showroom, force-set main to 72d4be3 base, open PR (the three improvements as diff), merge -> main ends with everything.
+
+---
+Task ID: 17
+Agent: Z.ai Code (main agent)
+Task: Fix the empty/ugly backdrop the user reported (screenshot: car roof cut at bottom, huge flat dark band above a hard horizon edge).
+
+Work Log:
+- Diagnosed: the pre-Task-15 showroom left the upper frame as a featureless black void with a hard floor/backdrop seam — worst on wide viewports (the user's crop is ~5.9:1).
+- Upgraded the procedural showroom (still zero image assets, no smoke):
+  * FogExp2 0.04 → 0.018 so distant architecture reads (floor rim still hidden — the new wall occludes it anyway).
+  * Cyclorama: 360° infinity wall (r=46 cylinder, BackSide) with a canvas gradient — top row ≡ fog color for a seamless dissolve, warm glow band landing on the floor line.
+  * Stage halo rings ×2 (torus, warm white, 0.5/0.2 opacity) hung in the -x/-z quadrant so the hero cam looks through the car at them and the front close-up frames them behind the nose; desktop-only.
+  * 5 distant light pillars (parallax anchors for the flank sweep) — tuned twice: shortened/dimmed the two +x pillars that crossed the nav in the rear state, moved the one that read as an antenna on the car roof.
+  * Floor runway lines (2×46-unit warm strips at z=±3.6) + 8 sparse cross ticks — design language for the bare slab.
+  * Fake volumetric light shaft (additive open cone under the central softbox, gradient texture, dissolves before the floor) — desktop-only; both close-up cams sit outside its r=3.8 footprint.
+  * Floor pool light 0.04 → 0.09.
+- Tooling note: agent-browser sessions default to 1280×577 (not 800) — "stuck scrollY 1962" was actually max-scroll at that height, and one wheel-command hang needed a daemon pkill. Closing/opening sessions resets both.
+- Verification (desktop 1280×800, wide 1280×577 & 1728×720, mobile 390×844): hero (halo+shaft+lines, no void), front close-up (ring behind nose), rear dwell (clean, pillars off the nav), outro+closing card, mobile hero+front caption, 0 lint, no horizontal overflow.
+
+Stage Summary:
+- Backdrop complaint fixed: every camera state now has layered studio architecture — the empty black band is gone on wide viewports too.
+- Committed 1520869 on main. GitHub push still blocked: 3rd token (github_pat_11AQKKITY01uQ…) also lacks Contents:write — Contents API PUT and git push both 403; PR creation needs Pull requests:write. Local main is push-ready the moment a write-scoped token arrives.
