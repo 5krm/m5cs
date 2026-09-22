@@ -211,3 +211,26 @@ Work Log:
 Stage Summary:
 - Backdrop complaint fixed: every camera state now has layered studio architecture — the empty black band is gone on wide viewports too.
 - Committed 1520869 on main. GitHub push still blocked: 3rd token (github_pat_11AQKKITY01uQ…) also lacks Contents:write — Contents API PUT and git push both 403; PR creation needs Pull requests:write. Local main is push-ready the moment a write-scoped token arrives.
+
+---
+Task ID: 18
+Agent: Z.ai Code (main agent)
+Task: User feedback round on showroom v3 — "the light fucked the car, fix it", "remove those circles on the background", plus the earlier request: more realistic shadows under the car.
+
+Work Log:
+- Root-caused the blown-out look from the previous upgrade attempt: the UnrealBloomPass/EffectComposer pipeline renders into a linear-HDR buffer, so every emissive/additive element (softbox strips, light shaft, pool, reflections) stacked far hotter than the verified direct-render path, and the steepened key light (63° elevation, 420 intensity) massively overlit the floor and body.
+- Lighting revert to the verified baseline: key back to (7,9,5) @ 380 (kept the new shadow.radius = 4 PCF softening), exposure 1.0, floor roughness 0.32 / envMapIntensity 0.4, pool 0.09, shaft back to full-height cone @ 0.09 opacity, strips back to y=5.35 @ 0xd8dee9. Removed the composer entirely (imports, tick, resize, teardown) — direct renderer.render() again.
+- Removed the circles the user called out: both floating halo torus rings and both stage floor RingGeometry circles deleted; the wall-glow sprite that lived behind them also removed.
+- KEPT the genuinely good upgrades: per-wheel contact-shadow patches (4 canvas-gradient blobs positioned from the normalized footprint at ±0.30·len / ±0.43·width, added on model load so any model adapts), softened body-AO ellipse (0.5 opacity under the wheel patches), cyclorama wall-panel seams + brighter horizon band, drifting dust motes in the light shaft (140 additive sprites, sin-bob + slow rotation, disabled for prefers-reduced-motion), mirrored light pillars below the floor slab.
+- Fixed a self-inflicted mid-edit paste error (PointsMaterial block lost its closing props) caught by review before any verify run.
+
+Verification:
+- lint 0/0.
+- Desktop 1280×800 fresh reload: hero (satin-gray car, dark floor restored, dust visible, warm horizon, no circles anywhere, wheel patches visibly grounding the car), front close-up (grille + laserlights + mirror reflection + rear wheel patch), rear dwell (diffuser/quad exhaust + shadow patches), outro wide (mirror double + closing card).
+- Scroll driven with real mouse wheel (Lenis): 0 → 2720 (max) → 950 → 2150 → 0; scrub and reverse both behave.
+- Mobile 390×844 brand-new session: fresh load with 0 console/page errors; hero grounded with visible contact patches, no overflow.
+- dev.log warnings are all from mid-edit HMR cycles (transient), fresh loads clean.
+
+Stage Summary:
+- Car reads parked and realistically grounded: real 2K cast shadow + body AO + 4 wheel contact patches; lighting back to the approved studio look; zero decorative circles.
+- Committed aa519d6 on main.
