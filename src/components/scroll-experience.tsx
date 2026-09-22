@@ -32,7 +32,7 @@
  * ScrollTrigger pin, but perfectly jitter-free with Lenis on every browser.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import type { CSSProperties } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -42,6 +42,40 @@ import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import Lenis from 'lenis'
 import 'lenis/dist/lenis.css'
+
+export type StudioTheme = 'apex' | 'm' | 'night'
+export type PaintFinish = 'frozen-deep-green' | 'brands-hatch-grey' | 'frozen-bluestone' | 'sapphire-black'
+
+export const PAINT_CONFIGS: Record<PaintFinish, { name: string; hex: string; roughness: number; metalness: number; clearcoat: number }> = {
+  'frozen-deep-green': {
+    name: 'Frozen Deep Green',
+    hex: '#183124',
+    roughness: 0.38,
+    metalness: 0.72,
+    clearcoat: 0.9,
+  },
+  'brands-hatch-grey': {
+    name: 'Brands Hatch Grey',
+    hex: '#69717a',
+    roughness: 0.34,
+    metalness: 0.82,
+    clearcoat: 1.0,
+  },
+  'frozen-bluestone': {
+    name: 'Frozen Bluestone',
+    hex: '#3f5060',
+    roughness: 0.36,
+    metalness: 0.8,
+    clearcoat: 0.95,
+  },
+  'sapphire-black': {
+    name: 'Black Sapphire',
+    hex: '#0d0f12',
+    roughness: 0.18,
+    metalness: 0.92,
+    clearcoat: 1.0,
+  },
+}
 
 /* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
 
@@ -146,14 +180,24 @@ function makeDustSpriteTexture(): THREE.CanvasTexture {
 }
 
 /** Dark seamless studio vignette used as scene.background */
-function makeStudioBackdropTexture(): THREE.CanvasTexture {
+function makeStudioBackdropTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 1024
   const ctx = canvas.getContext('2d')!
-  const g = ctx.createRadialGradient(512, 430, 60, 512, 512, 760)
-  g.addColorStop(0, '#1d212b')
-  g.addColorStop(0.5, '#101218')
-  g.addColorStop(1, '#050608')
+  const g = ctx.createRadialGradient(512, 430, 40, 512, 512, 780)
+  if (theme === 'm') {
+    g.addColorStop(0, '#10162a')
+    g.addColorStop(0.48, '#0b0f1c')
+    g.addColorStop(1, '#03050a')
+  } else if (theme === 'night') {
+    g.addColorStop(0, '#0a1524')
+    g.addColorStop(0.48, '#060c16')
+    g.addColorStop(1, '#020408')
+  } else {
+    g.addColorStop(0, '#202430')
+    g.addColorStop(0.48, '#11131a')
+    g.addColorStop(1, '#050608')
+  }
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 1024, 1024)
   const tex = new THREE.CanvasTexture(canvas)
@@ -162,14 +206,24 @@ function makeStudioBackdropTexture(): THREE.CanvasTexture {
 }
 
 /** Warm pool of showroom light on the floor under the car */
-function makeFloorPoolTexture(): THREE.CanvasTexture {
+function makeFloorPoolTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 256
   const ctx = canvas.getContext('2d')!
   const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128)
-  g.addColorStop(0, 'rgba(255,244,224,0.9)')
-  g.addColorStop(0.45, 'rgba(255,244,224,0.28)')
-  g.addColorStop(1, 'rgba(255,244,224,0)')
+  if (theme === 'm') {
+    g.addColorStop(0, 'rgba(0, 154, 218, 0.85)')
+    g.addColorStop(0.42, 'rgba(43, 57, 144, 0.25)')
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  } else if (theme === 'night') {
+    g.addColorStop(0, 'rgba(137, 207, 240, 0.85)')
+    g.addColorStop(0.45, 'rgba(100, 160, 220, 0.22)')
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  } else {
+    g.addColorStop(0, 'rgba(255, 244, 224, 0.9)')
+    g.addColorStop(0.45, 'rgba(255, 244, 224, 0.28)')
+    g.addColorStop(1, 'rgba(255, 244, 224, 0)')
+  }
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 256, 256)
   const tex = new THREE.CanvasTexture(canvas)
@@ -177,50 +231,286 @@ function makeFloorPoolTexture(): THREE.CanvasTexture {
   return tex
 }
 
-/** Cyclorama wall — "infinity cove" gradient with a warm glow band that
- *  sits on the floor line, so the void above the horizon reads as studio
- *  depth instead of empty black. Top row matches the fog color exactly so
- *  the wall dissolves seamlessly into the haze. */
-function makeCycloramaTexture(): THREE.CanvasTexture {
+/** Cyclorama wall — "infinity cove" 360° studio architecture with recessed LED light columns
+ *  and seamless horizon glow band. */
+function makeCycloramaTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
-  canvas.width = 1024
-  canvas.height = 512
+  canvas.width = 2048
+  canvas.height = 1024
   const ctx = canvas.getContext('2d')!
-  const g = ctx.createLinearGradient(0, 0, 0, 512)
-  g.addColorStop(0, '#050608') // ≡ fog color — seamless dissolve at the top
-  g.addColorStop(0.5, '#0b0d12')
-  g.addColorStop(0.78, '#151823')
-  g.addColorStop(0.9, '#241e13') // warm lift begins
-  g.addColorStop(0.955, '#3f331c') // glow band peak (just above the floor)
-  g.addColorStop(1, '#0c0d11') // dark base at the floor seam
+
+  const g = ctx.createLinearGradient(0, 0, 0, 1024)
+  g.addColorStop(0, '#040508') // fog top
+  g.addColorStop(0.45, '#07090e')
+  g.addColorStop(0.72, '#0e111a')
+
+  if (theme === 'm') {
+    g.addColorStop(0.86, '#0f1728')
+    g.addColorStop(0.95, '#172745') // electric M blue lift
+    g.addColorStop(1, '#070a12')
+  } else if (theme === 'night') {
+    g.addColorStop(0.86, '#0b1422')
+    g.addColorStop(0.95, '#132236') // deep sapphire lift
+    g.addColorStop(1, '#05070c')
+  } else {
+    g.addColorStop(0.86, '#211a12')
+    g.addColorStop(0.95, '#3e311b') // warm golden apex glow
+    g.addColorStop(1, '#0a0c10')
+  }
+
   ctx.fillStyle = g
-  ctx.fillRect(0, 0, 1024, 512)
-  // faint vertical wall-panel seams — reads as a real studio cove
-  ctx.strokeStyle = 'rgba(255,255,255,0.028)'
-  ctx.lineWidth = 2
-  for (let x = 42; x < 1024; x += 86) {
+  ctx.fillRect(0, 0, 2048, 1024)
+
+  // Architectural panel seams
+  ctx.strokeStyle = 'rgba(255,255,255,0.024)'
+  ctx.lineWidth = 1.5
+  for (let x = 64; x < 2048; x += 128) {
     ctx.beginPath()
     ctx.moveTo(x, 0)
-    ctx.lineTo(x, 512)
+    ctx.lineTo(x, 1024)
     ctx.stroke()
   }
+
+  // Recessed perimeter vertical LED accent pillars
+  for (let x = 128; x < 2048; x += 256) {
+    const colG = ctx.createLinearGradient(x - 36, 0, x + 36, 0)
+    const glowColor =
+      theme === 'm'
+        ? (x % 512 === 0 ? 'rgba(0, 154, 218, ' : 'rgba(228, 0, 43, ')
+        : theme === 'night'
+        ? 'rgba(137, 207, 240, '
+        : 'rgba(255, 228, 185, '
+
+    colG.addColorStop(0, glowColor + '0)')
+    colG.addColorStop(0.5, glowColor + '0.12)')
+    colG.addColorStop(1, glowColor + '0)')
+
+    ctx.fillStyle = colG
+    ctx.fillRect(x - 36, 180, 72, 844)
+
+    // Inner bright core
+    ctx.fillStyle = glowColor + '0.35)'
+    ctx.fillRect(x - 2, 260, 4, 730)
+  }
+
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
 }
 
-/** Soft vertical falloff for the fake volumetric light shaft */
-function makeLightShaftTexture(): THREE.CanvasTexture {
+/** Soft vertical falloff for the volumetric light shaft */
+function makeLightShaftTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 256
   const ctx = canvas.getContext('2d')!
   const g = ctx.createLinearGradient(0, 0, 0, 256)
-  g.addColorStop(0, 'rgba(255,243,222,0.9)') // bright at the softbox
-  g.addColorStop(0.55, 'rgba(255,238,214,0.32)')
-  g.addColorStop(1, 'rgba(255,235,210,0)') // dissolves at the floor
+  if (theme === 'm') {
+    g.addColorStop(0, 'rgba(0, 154, 218, 0.85)')
+    g.addColorStop(0.55, 'rgba(43, 57, 144, 0.26)')
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  } else if (theme === 'night') {
+    g.addColorStop(0, 'rgba(160, 220, 255, 0.85)')
+    g.addColorStop(0.55, 'rgba(100, 170, 240, 0.25)')
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  } else {
+    g.addColorStop(0, 'rgba(255, 243, 222, 0.9)')
+    g.addColorStop(0.55, 'rgba(255, 238, 214, 0.32)')
+    g.addColorStop(1, 'rgba(255, 235, 210, 0)')
+  }
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 64, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Precision high-tech floor texture with obsidian tarmac, concentric distance rings,
+ *  BMW M tri-color calibration indices, coordinate crosshairs, and Munich GPS telemetry */
+function makeHighTechFloorTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 2048
+  const ctx = canvas.getContext('2d')!
+  const cx = 1024
+  const cy = 1024
+
+  // Obsidian base
+  const bg = ctx.createRadialGradient(cx, cy, 120, cx, cy, 1020)
+  bg.addColorStop(0, '#0a0d14')
+  bg.addColorStop(0.5, '#07080e')
+  bg.addColorStop(0.85, '#040508')
+  bg.addColorStop(1, '#020305')
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, 2048, 2048)
+
+  // Procedural micro-grit for tarmac realism
+  const imgData = ctx.getImageData(0, 0, 2048, 2048)
+  const d = imgData.data
+  for (let i = 0; i < d.length; i += 32) {
+    const noise = (Math.random() - 0.5) * 8
+    d[i] = Math.max(0, Math.min(255, d[i] + noise))
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + noise))
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + noise + 1))
+  }
+  ctx.putImageData(imgData, 0, 0)
+
+  // Sub-grid lines (64px)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.024)'
+  ctx.lineWidth = 1
+  for (let x = 0; x <= 2048; x += 64) {
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, 2048)
+    ctx.stroke()
+  }
+  for (let y = 0; y <= 2048; y += 64) {
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(2048, y)
+    ctx.stroke()
+  }
+
+  // Major grid lines (256px)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.055)'
+  ctx.lineWidth = 1.5
+  for (let x = 0; x <= 2048; x += 256) {
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, 2048)
+    ctx.stroke()
+  }
+  for (let y = 0; y <= 2048; y += 256) {
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(2048, y)
+    ctx.stroke()
+  }
+
+  // Concentric chassis calibration rings
+  const ringColor =
+    theme === 'm'
+      ? 'rgba(0, 154, 218, 0.16)'
+      : theme === 'night'
+      ? 'rgba(137, 207, 240, 0.16)'
+      : 'rgba(255, 228, 185, 0.16)'
+
+  const rings = [140, 260, 420, 620, 840]
+  rings.forEach((r, idx) => {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.strokeStyle = idx === 1 || idx === 3 ? ringColor : 'rgba(255, 255, 255, 0.04)'
+    ctx.lineWidth = 1.2
+    if (idx % 2 === 1) {
+      ctx.setLineDash([4, 8])
+    } else {
+      ctx.setLineDash([])
+    }
+    ctx.stroke()
+  })
+  ctx.setLineDash([])
+
+  // Radial degree tick marks on outer ring (r = 840)
+  const outerR = 840
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+  ctx.lineWidth = 1
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 36) {
+    const isMajor = a % (Math.PI / 6) < 0.01
+    const len = isMajor ? 16 : 8
+    const cos = Math.cos(a)
+    const sin = Math.sin(a)
+    ctx.beginPath()
+    ctx.moveTo(cx + cos * (outerR - len), cy + sin * (outerR - len))
+    ctx.lineTo(cx + cos * outerR, cy + sin * outerR)
+    ctx.stroke()
+  }
+
+  // BMW M tri-color accent notches on middle ring (r = 420)
+  const mR = 420
+  const mColors = ['#009ADA', '#2B3990', '#E4002B']
+  const angles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]
+  angles.forEach((baseAngle) => {
+    mColors.forEach((col, cIdx) => {
+      const a = baseAngle + (cIdx - 1) * 0.035
+      ctx.beginPath()
+      ctx.arc(cx, cy, mR, a - 0.012, a + 0.012)
+      ctx.strokeStyle = col
+      ctx.lineWidth = 3
+      ctx.stroke()
+    })
+  })
+
+  // Precision typography & telemetry indicators
+  ctx.font = '10px monospace'
+  ctx.fillStyle = ringColor
+  ctx.textAlign = 'center'
+  ctx.fillText('BMW M DIVISION // 48.1767° N, 11.5583° E // APEX CALIBRATION', cx, cy - 280)
+  ctx.fillText('M5 CS // TWIN-TURBO 4.4L V8 // 627 HP // LIGHTWEIGHT BENCH', cx, cy + 300)
+
+  // Alignment crosshairs at major intersections
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+  ctx.lineWidth = 1
+  for (let x = 512; x <= 1536; x += 256) {
+    for (let y = 512; y <= 1536; y += 256) {
+      const arm = 6
+      ctx.beginPath()
+      ctx.moveTo(x - arm, y)
+      ctx.lineTo(x + arm, y)
+      ctx.moveTo(x, y - arm)
+      ctx.lineTo(x, y + arm)
+      ctx.stroke()
+    }
+  }
+
+  // Radial border vignette
+  const edgeGrad = ctx.createRadialGradient(cx, cy, 700, cx, cy, 1024)
+  edgeGrad.addColorStop(0, 'rgba(4, 5, 8, 0)')
+  edgeGrad.addColorStop(0.8, 'rgba(4, 5, 8, 0.65)')
+  edgeGrad.addColorStop(1, 'rgba(2, 3, 5, 1)')
+  ctx.fillStyle = edgeGrad
+  ctx.fillRect(0, 0, 2048, 2048)
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Forward laserlight beam projection cast on floor */
+function makeHeadlightProjectionTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(80, 128, 10, 260, 128, 240)
+  const col =
+    theme === 'night'
+      ? '160, 215, 255'
+      : theme === 'm'
+      ? '0, 170, 255'
+      : '255, 235, 195'
+  g.addColorStop(0, `rgba(${col}, 0.65)`)
+  g.addColorStop(0.35, `rgba(${col}, 0.25)`)
+  g.addColorStop(0.7, `rgba(${col}, 0.06)`)
+  g.addColorStop(1, `rgba(${col}, 0)`)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 512, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Rear diffuser crimson glow pool cast on floor */
+function makeTaillightProjectionTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(432, 128, 10, 252, 128, 240)
+  g.addColorStop(0, 'rgba(235, 20, 40, 0.55)')
+  g.addColorStop(0.38, 'rgba(200, 15, 30, 0.22)')
+  g.addColorStop(0.75, 'rgba(140, 10, 20, 0.05)')
+  g.addColorStop(1, 'rgba(80, 0, 10, 0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 512, 256)
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -234,16 +524,6 @@ function makeLightShaftTexture(): THREE.CanvasTexture {
 const BODY_PAINT = new Set(['Bodyshell1Mtl', 'Bonnet0041Mtl', 'Bonnet1Mtl', 'Boot0041Mtl', 'DoorColor1Mtl'])
 const GLASS = new Set(['Windowrf1Mtl'])
 
-const satinGrayPaint = () =>
-  new THREE.MeshPhysicalMaterial({
-    color: '#868c93',
-    metalness: 0.82,
-    roughness: 0.34,
-    clearcoat: 1,
-    clearcoatRoughness: 0.18,
-    envMapIntensity: 0.85,
-  })
-
 const darkGlass = () =>
   new THREE.MeshPhysicalMaterial({
     color: '#06080b',
@@ -256,6 +536,7 @@ const darkGlass = () =>
 
 type CarRig = {
   car: THREE.Group
+  paintMaterials: THREE.MeshPhysicalMaterial[]
 }
 
 /**
@@ -264,7 +545,7 @@ type CarRig = {
  * horizontal span to TARGET_LENGTH, repaints body/glass, hides showroom
  * plates and enables shadows.
  */
-function buildCarRig(source: THREE.Object3D): CarRig {
+function buildCarRig(source: THREE.Object3D, initialPaint: PaintFinish = 'brands-hatch-grey'): CarRig {
   const model = source.clone(true)
 
   const box = new THREE.Box3().setFromObject(model)
@@ -275,7 +556,17 @@ function buildCarRig(source: THREE.Object3D): CarRig {
   model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale)
   if (FLIP_MODEL) model.rotation.y = Math.PI
 
-  const gray = satinGrayPaint()
+  const paintMaterials: THREE.MeshPhysicalMaterial[] = []
+  const cfg = PAINT_CONFIGS[initialPaint]
+  const basePaint = new THREE.MeshPhysicalMaterial({
+    color: cfg.hex,
+    metalness: cfg.metalness,
+    roughness: cfg.roughness,
+    clearcoat: cfg.clearcoat,
+    clearcoatRoughness: 0.18,
+    envMapIntensity: 0.85,
+  })
+
   const glass = darkGlass()
   const junk: THREE.Object3D[] = []
   model.traverse((obj) => {
@@ -287,7 +578,9 @@ function buildCarRig(source: THREE.Object3D): CarRig {
     for (let i = 0; i < mats.length; i++) {
       const name = mats[i]?.name ?? ''
       if (BODY_PAINT.has(name)) {
-        mats[i] = gray
+        const mat = basePaint.clone()
+        mats[i] = mat
+        paintMaterials.push(mat)
         replaced = true
       } else if (GLASS.has(name)) {
         mats[i] = glass
@@ -306,7 +599,7 @@ function buildCarRig(source: THREE.Object3D): CarRig {
   const car = new THREE.Group()
   car.add(model)
 
-  return { car }
+  return { car, paintMaterials }
 }
 
 /**
@@ -371,10 +664,17 @@ function flattenKey(k: CamKey, mobile: boolean): FlatKey {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- * Overlay UI data (copied verbatim from the approved hero design)
+ * Overlay Navigation & Stage Anchors
  * ══════════════════════════════════════════════════════════════════════ */
 
-const NAV_LINKS = ['Overview', 'Performance', 'Design', 'Specs'] as const
+const NAV_ITEMS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'performance', label: 'Performance' },
+  { id: 'design', label: 'Design' },
+  { id: 'specs', label: 'Specs' },
+] as const
+
+type SectionId = (typeof NAV_ITEMS)[number]['id']
 
 type StarDot = {
   top: string
@@ -416,11 +716,65 @@ export default function ScrollExperience() {
   const capFrontRef = useRef<HTMLDivElement>(null)
   const capRearRef = useRef<HTMLDivElement>(null)
   const endCardRef = useRef<HTMLDivElement>(null)
-  /* Loading overlay — progress is written via refs (no re-render per chunk) */
-  const loaderRef = useRef<HTMLDivElement>(null)
-  const loaderBarRef = useRef<HTMLDivElement>(null)
-  const loaderPctRef = useRef<HTMLSpanElement>(null)
-  const loaderMsgRef = useRef<HTMLParagraphElement>(null)
+
+  const [theme, setTheme] = useState<StudioTheme>('apex')
+  const [highBeams, setHighBeams] = useState(true)
+  const [paint, setPaint] = useState<PaintFinish>('brands-hatch-grey')
+  const [orbitMode, setOrbitMode] = useState(false)
+  const [activeSection, setActiveSection] = useState<SectionId>('overview')
+  const [scrollProgress, setScrollProgress] = useState(0)
+  const [showBookingModal, setShowBookingModal] = useState(false)
+  const [bookingConfirmed, setBookingConfirmed] = useState(false)
+  const [showVehicleControls, setShowVehicleControls] = useState(false)
+
+  const lenisInstanceRef = useRef<Lenis | null>(null)
+  const updateThemeRef = useRef<((t: StudioTheme, hb: boolean) => void) | null>(null)
+  const updatePaintRef = useRef<((p: PaintFinish) => void) | null>(null)
+  const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
+  const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
+
+  const scrollToSection = useCallback((section: SectionId) => {
+    const track = trackRef.current
+    if (!track) return
+    const maxScroll = track.offsetHeight - window.innerHeight
+    let target = 0
+    if (section === 'overview') target = 0
+    else if (section === 'performance') target = maxScroll * 0.32
+    else if (section === 'design') target = maxScroll * 0.65
+    else if (section === 'specs') target = maxScroll * 0.98
+
+    if (lenisInstanceRef.current) {
+      lenisInstanceRef.current.scrollTo(target, { duration: 1.2 })
+    } else {
+      window.scrollTo({ top: target, behavior: 'smooth' })
+    }
+  }, [])
+
+  const handleThemeChange = useCallback((newTheme: StudioTheme) => {
+    setTheme(newTheme)
+    updateThemeRef.current?.(newTheme, highBeams)
+  }, [highBeams])
+
+  const toggleHighBeams = useCallback(() => {
+    setHighBeams((prev) => {
+      const next = !prev
+      updateThemeRef.current?.(theme, next)
+      return next
+    })
+  }, [theme])
+
+  const handlePaintChange = useCallback((finish: PaintFinish) => {
+    setPaint(finish)
+    updatePaintRef.current?.(finish)
+  }, [])
+
+  const handleOrbitToggle = useCallback(() => {
+    setOrbitMode((prev) => {
+      const next = !prev
+      toggleOrbitRef.current?.(next)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -429,21 +783,13 @@ export default function ScrollExperience() {
     const capFront = capFrontRef.current
     const capRear = capRearRef.current
     const endCard = endCardRef.current
-    const loaderEl = loaderRef.current
-    const loaderBar = loaderBarRef.current
-    const loaderPct = loaderPctRef.current
-    const loaderMsg = loaderMsgRef.current
     if (
       !canvas ||
       !track ||
       !heroLayer ||
       !capFront ||
       !capRear ||
-      !endCard ||
-      !loaderEl ||
-      !loaderBar ||
-      !loaderPct ||
-      !loaderMsg
+      !endCard
     )
       return
 
@@ -508,122 +854,131 @@ export default function ScrollExperience() {
     rim.position.set(-8, 5, -6)
     scene.add(rim)
 
-    scene.add(new THREE.HemisphereLight(0x39404e, 0x0b0c10, 0.38)) // studio ambience
+    scene.add(new THREE.HemisphereLight(0x39404e, 0x0b0c10, 0.42)) // studio ambience
 
-    /* ── Overhead softbox light strips (visible studio architecture) ──
-     * Pure-emissive slabs; the paint's actual highlights come from the
-     * PMREM RoomEnvironment. These read as the studio in the background
-     * and fade into the fog with distance. Desktop only — on portrait
-     * phones the wider FOV catches them as odd slashes across the sky. */
-    if (window.innerWidth >= 768) {
-      const stripMat = new THREE.MeshBasicMaterial({ color: 0xd8dee9, side: THREE.DoubleSide })
-      for (const [sx, sz, sw] of [
-        [0, -3.4, 13],
-        [0, 0, 15],
-        [0, 3.4, 13],
-      ] as const) {
-        const strip = new THREE.Mesh(new THREE.PlaneGeometry(sw, 0.72), stripMat)
-        strip.position.set(sx, 5.35, sz)
-        strip.rotation.x = Math.PI / 2 // face down toward the car
-        scene.add(strip)
+    /* ── Suspended architectural luminaire canopy (Next-Level Overhead Studio) ──
+     * A structural floating truss system with high-output emissive diffuser panels,
+     * chamfered dark metallic bezels, M-aerodynamic angled winglet strips,
+     * and high-tension steel suspension cables vanishing into the ceiling fog. */
+    const canopyGroup = new THREE.Group()
+    canopyGroup.position.set(0, 5.35, 0)
+    scene.add(canopyGroup)
+
+    const diffuserMat = new THREE.MeshBasicMaterial({ color: 0xffeedb, side: THREE.DoubleSide })
+    const outerFrameMat = new THREE.MeshStandardMaterial({ color: 0x0c0e14, metalness: 0.9, roughness: 0.25 })
+
+    // Central primary softbox diffuser
+    const centerDiffuser = new THREE.Mesh(new THREE.PlaneGeometry(16, 2.2), diffuserMat)
+    centerDiffuser.rotation.x = Math.PI / 2
+    canopyGroup.add(centerDiffuser)
+
+    // Structural frame border bars around the central softbox
+    for (const zOffset of [-1.12, 1.12]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(16.3, 0.12, 0.1), outerFrameMat)
+      bar.position.set(0, 0.04, zOffset)
+      canopyGroup.add(bar)
+    }
+    for (const xOffset of [-8.15, 8.15]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 2.34), outerFrameMat)
+      bar.position.set(xOffset, 0.04, 0)
+      canopyGroup.add(bar)
+    }
+
+    // Angled M-aerodynamic flank light strips
+    const wingMat = new THREE.MeshBasicMaterial({ color: 0xe8ecf4, side: THREE.DoubleSide })
+    for (const zSide of [-3.6, 3.6]) {
+      const wing = new THREE.Mesh(new THREE.PlaneGeometry(14, 0.65), wingMat)
+      wing.position.set(0, -0.08, zSide)
+      wing.rotation.x = Math.PI / 2 + (zSide > 0 ? -0.2 : 0.2)
+      canopyGroup.add(wing)
+
+      const wingFrame = new THREE.Mesh(new THREE.BoxGeometry(14.2, 0.08, 0.08), outerFrameMat)
+      wingFrame.position.set(0, -0.04, zSide + (zSide > 0 ? 0.34 : -0.34))
+      canopyGroup.add(wingFrame)
+    }
+
+    // High-tension steel suspension cables rising into the dark ceiling void
+    const cableMat = new THREE.MeshBasicMaterial({ color: 0x42495b, transparent: true, opacity: 0.55 })
+    for (const cx of [-7.6, 7.6]) {
+      for (const cz of [-3.4, 3.4]) {
+        const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 8, 8), cableMat)
+        cable.position.set(cx, 4, cz)
+        canopyGroup.add(cable)
       }
     }
 
-    /* ── Cyclorama — 360° infinity wall at r = 46 ────────────────────
-     * Replaces the empty black void behind the horizon with a photo-studio
-     * cove: near-black up top, warm glow band landing on the floor line.
-     * The thinner fog lets its gradient read while still hiding the floor
-     * rim (the wall occludes everything beyond r = 46 anyway). */
+    /* ── Cyclorama — 360° infinity cove with recessed LED columns & horizon glow ── */
     const cyclorama = new THREE.Mesh(
       new THREE.CylinderGeometry(46, 46, 24, 72, 1, true),
-      new THREE.MeshBasicMaterial({ map: makeCycloramaTexture(), side: THREE.BackSide }),
+      new THREE.MeshBasicMaterial({ map: makeCycloramaTexture('apex'), side: THREE.BackSide }),
     )
-    cyclorama.position.y = 12 // base sits exactly on y = 0
+    cyclorama.position.y = 12
     scene.add(cyclorama)
 
-    /* ── Distant light pillars — parallax anchors for the flank sweep ─ */
-    const pillarMat = new THREE.MeshBasicMaterial({ color: 0xe8ecf2, transparent: true, opacity: 0.4 })
-    for (const [px, pz, ph] of [
-      [-14, -11, 7.5],
-      [-20, -4, 8],
-      [-9, -18, 6.5],
-      [16.5, -13, 4.5],
-      [29, -7, 4.5],
-    ] as const) {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.09, ph, 0.09), pillarMat)
-      pillar.position.set(px, ph / 2, pz)
-      scene.add(pillar)
-    }
-    // Opaque mirror clones just below y = 0 — show through the semi-
-    // transparent slab as faint reflections (same trick as the car double).
-    if (window.innerWidth >= 768) {
-      const mirrorPillarMat = new THREE.MeshBasicMaterial({ color: 0x272d3a })
-      for (const [px, pz, ph] of [
-        [-14, -11, 7.5],
-        [-20, -4, 8],
-        [-9, -18, 6.5],
-        [16.5, -13, 4.5],
-        [29, -7, 4.5],
-      ] as const) {
-        const mirrorPillar = new THREE.Mesh(new THREE.BoxGeometry(0.09, ph, 0.09), mirrorPillarMat)
-        mirrorPillar.position.set(px, -ph / 2, pz)
-        scene.add(mirrorPillar)
+    /* ── Distant illuminated architectural column pylons ──────────────────────── */
+    const pillarBodyMat = new THREE.MeshStandardMaterial({ color: 0x11131a, metalness: 0.7, roughness: 0.3 })
+    const pillarLedMat = new THREE.MeshBasicMaterial({ color: 0xe8ecf8, transparent: true, opacity: 0.75 })
+
+    const PILLAR_CONFIGS = [
+      [-16, -12, 7.5],
+      [-22, -4, 8.0],
+      [-10, -18, 6.5],
+      [18, -13, 5.0],
+      [30, -7, 5.0],
+      [-4, 20, 6.5],
+    ] as const
+
+    for (const [px, pz, ph] of PILLAR_CONFIGS) {
+      const pGroup = new THREE.Group()
+      pGroup.position.set(px, ph / 2, pz)
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, ph, 0.18), pillarBodyMat)
+      pGroup.add(body)
+
+      // Recessed vertical LED strip running down its face
+      const led = new THREE.Mesh(new THREE.PlaneGeometry(0.03, ph * 0.9), pillarLedMat)
+      led.position.set(0, 0, 0.095)
+      pGroup.add(led)
+
+      scene.add(pGroup)
+
+      // Reflected pylon below floor
+      if (window.innerWidth >= 768) {
+        const mirrorPGroup = pGroup.clone()
+        mirrorPGroup.position.set(px, -ph / 2, pz)
+        scene.add(mirrorPGroup)
       }
     }
 
-    /* ── Floor runway lines — design language for the bare slab ────── */
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.26, depthWrite: false })
-    const tickMat = new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.13, depthWrite: false })
-    for (const lz of [-3.6, 3.6]) {
-      const line = new THREE.Mesh(new THREE.PlaneGeometry(46, 0.07), lineMat)
-      line.rotation.x = -Math.PI / 2
-      line.position.set(0, 0.008, lz)
-      line.renderOrder = 1
-      scene.add(line)
-      for (const tx of [-14, -7, 7, 14]) {
-        const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 1.4), tickMat)
-        tick.rotation.x = -Math.PI / 2
-        tick.position.set(tx, 0.008, lz)
-        tick.renderOrder = 1
-        scene.add(tick)
-      }
-    }
-
-    /* ── Light shaft + drifting dust (desktop wide shots only) ────────
-     * A fake volumetric cone under the central softbox; portrait phones
-     * skip it — their wider FOV turns it into lens wash. */
+    /* ── Volumetric light shaft + shimmering dust motes ─────────────── */
+    let shaft: THREE.Mesh | null = null
     if (window.innerWidth >= 768) {
-      /* Fake volumetric shaft under the central softbox — additive cone
-       * that dissolves before the floor. Both close-up cameras sit just
-       * outside its footprint (r = 3.8), so it never washes the lens. */
-      const shaft = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 3.8, 5.3, 48, 1, true),
+      shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 3.9, 5.3, 48, 1, true),
         new THREE.MeshBasicMaterial({
-          map: makeLightShaftTexture(),
+          map: makeLightShaftTexture('apex'),
           transparent: true,
-          opacity: 0.09,
+          opacity: 0.11,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           side: THREE.DoubleSide,
           fog: false,
         }),
       )
-      shaft.position.set(0, 2.68, 0) // top kisses the central strip at y = 5.33
+      shaft.position.set(0, 2.68, 0)
       shaft.renderOrder = 2
       scene.add(shaft)
 
-      /* Drifting dust motes inside the light shaft — makes the air itself
-       * feel dense and expensive. Very subtle: ~140 tiny additive specks. */
-      const DUST_COUNT = 140
+      const DUST_COUNT = 200
       const dustBase = new Float32Array(DUST_COUNT * 3)
-      const dustSeed = new Float32Array(DUST_COUNT * 2) // bob speed, phase
+      const dustSeed = new Float32Array(DUST_COUNT * 2)
       for (let i = 0; i < DUST_COUNT; i++) {
-        const r = Math.sqrt(Math.random()) * 2.3
+        const r = Math.sqrt(Math.random()) * 2.5
         const a = Math.random() * Math.PI * 2
         dustBase[i * 3] = Math.cos(a) * r
-        dustBase[i * 3 + 1] = 0.3 + Math.random() * 3.6
+        dustBase[i * 3 + 1] = 0.25 + Math.random() * 3.8
         dustBase[i * 3 + 2] = Math.sin(a) * r
-        dustSeed[i * 2] = 0.25 + Math.random() * 0.5
+        dustSeed[i * 2] = 0.2 + Math.random() * 0.6
         dustSeed[i * 2 + 1] = Math.random() * Math.PI * 2
       }
       const dustGeo = new THREE.BufferGeometry()
@@ -632,11 +987,11 @@ export default function ScrollExperience() {
         dustGeo,
         new THREE.PointsMaterial({
           map: makeDustSpriteTexture(),
-          size: 0.05,
+          size: 0.055,
           sizeAttenuation: true,
-          color: 0xfff3dd,
+          color: 0xfff2dc,
           transparent: true,
-          opacity: 0.32,
+          opacity: 0.36,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           fog: false,
@@ -652,39 +1007,39 @@ export default function ScrollExperience() {
             arr[i * 3 + 1] = dustBase[i * 3 + 1] + Math.sin(t * dustSeed[i * 2] + dustSeed[i * 2 + 1]) * 0.4
           }
           attr.needsUpdate = true
-          dust.rotation.y = t * 0.04
+          dust.rotation.y = t * 0.035
         }
       }
     }
 
-    /* ── Floor — dark showroom slab with a reflection window ─────────
-     * The mirrored car double (added with the model, desktop only) sits
-     * just below y = 0; this semi-transparent floor blends it back at
-     * ~16% strength — the classic configurator mirror-floor look — while
-     * still receiving the real cast shadow. ✏️ If a shot floats, raise
-     * that key's pos[1] / lower its target[1]; keep the floor opaque-ish. */
+    /* ── High-Tech Obsidian Floor with Precision Calibration Grid ──── */
+    const floorTex = makeHighTechFloorTexture('apex')
+    floorTex.wrapS = THREE.ClampToEdgeWrapping
+    floorTex.wrapT = THREE.ClampToEdgeWrapping
+
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(90, 72),
+      new THREE.CircleGeometry(90, 80),
       new THREE.MeshStandardMaterial({
-        color: 0x06070b,
-        roughness: 0.32,
-        metalness: 0.55,
-        envMapIntensity: 0.4,
+        color: 0xffffff,
+        map: floorTex,
+        roughness: 0.35,
+        metalness: 0.62,
+        envMapIntensity: 0.5,
         transparent: true,
-        opacity: 0.84,
+        opacity: 0.88,
       }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     scene.add(floor)
 
-    const poolTex = makeFloorPoolTexture()
+    const poolTex = makeFloorPoolTexture('apex')
     const pool = new THREE.Mesh(
-      new THREE.PlaneGeometry(12, 12),
+      new THREE.PlaneGeometry(13, 13),
       new THREE.MeshBasicMaterial({
         map: poolTex,
         transparent: true,
-        opacity: 0.09,
+        opacity: 0.12,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -693,25 +1048,119 @@ export default function ScrollExperience() {
     pool.position.y = 0.01
     scene.add(pool)
 
-    /* ── Car root + fake-AO contact blob (model streams in async) ──── */
+    /* ── Car root + contact shadows + dynamic automotive projections ─ */
     const carGroup = new THREE.Group()
     carGroup.rotation.y = BASE_YAW
     scene.add(carGroup)
 
-    // Soft dark ellipse under the footprint (yaws with the car) — the
-    // body AO layer. The per-wheel contact patches (added with the model)
-    // sit just beneath it and do the crisp "parked on real asphalt" work.
+    // Forward Laserlight floor beam projection
+    const headlightTex = makeHeadlightProjectionTexture('apex')
+    const headlightBeam = new THREE.Mesh(
+      new THREE.PlaneGeometry(7.5, 4.4),
+      new THREE.MeshBasicMaterial({
+        map: headlightTex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.82,
+      }),
+    )
+    headlightBeam.rotation.x = -Math.PI / 2
+    headlightBeam.position.set(4.6, 0.014, 0)
+    headlightBeam.renderOrder = 2
+    carGroup.add(headlightBeam)
+
+    // Rear diffuser crimson glow pool
+    const taillightTex = makeTaillightProjectionTexture()
+    const taillightBeam = new THREE.Mesh(
+      new THREE.PlaneGeometry(6.2, 3.8),
+      new THREE.MeshBasicMaterial({
+        map: taillightTex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.72,
+      }),
+    )
+    taillightBeam.rotation.x = -Math.PI / 2
+    taillightBeam.position.set(-4.2, 0.014, 0)
+    taillightBeam.renderOrder = 2
+    carGroup.add(taillightBeam)
+
+    // Body AO contact shadow
     const contactTex = makeContactShadowTexture()
     const contact = new THREE.Mesh(
       new THREE.PlaneGeometry(TARGET_LENGTH * 1.22, TARGET_LENGTH * 0.56),
-      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false, opacity: 0.5 }),
+      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false, opacity: 0.52 }),
     )
     contact.rotation.x = -Math.PI / 2
-    contact.position.y = 0.014 // above the wheel patches, below the tires
+    contact.position.y = 0.014
     contact.renderOrder = 1
     carGroup.add(contact)
 
+    /* ── Real-Time Theme Transition Handler ────────────────────────── */
+    const applyTheme = (t: StudioTheme, hb: boolean) => {
+      backdropTex.dispose()
+      const newBackdrop = makeStudioBackdropTexture(t)
+      scene.background = newBackdrop
+
+      const curCyMap = (cyclorama.material as THREE.MeshBasicMaterial).map
+      curCyMap?.dispose()
+      ;(cyclorama.material as THREE.MeshBasicMaterial).map = makeCycloramaTexture(t)
+      ;(cyclorama.material as THREE.MeshBasicMaterial).needsUpdate = true
+
+      const curFloorMap = (floor.material as THREE.MeshStandardMaterial).map
+      curFloorMap?.dispose()
+      ;(floor.material as THREE.MeshStandardMaterial).map = makeHighTechFloorTexture(t)
+      ;(floor.material as THREE.MeshStandardMaterial).needsUpdate = true
+
+      const curPoolMap = (pool.material as THREE.MeshBasicMaterial).map
+      curPoolMap?.dispose()
+      ;(pool.material as THREE.MeshBasicMaterial).map = makeFloorPoolTexture(t)
+      ;(pool.material as THREE.MeshBasicMaterial).needsUpdate = true
+
+      if (t === 'm') {
+        key.color.setHex(0xeaf5ff)
+        rim.color.setHex(0x009ada)
+        diffuserMat.color.setHex(0xd0e8ff)
+        wingMat.color.setHex(0x009ada)
+      } else if (t === 'night') {
+        key.color.setHex(0xd0e6ff)
+        rim.color.setHex(0x2860a8)
+        diffuserMat.color.setHex(0xc0ddff)
+        wingMat.color.setHex(0x89cff0)
+      } else {
+        key.color.setHex(0xfff1dd)
+        rim.color.setHex(0xbfd0e8)
+        diffuserMat.color.setHex(0xffeedb)
+        wingMat.color.setHex(0xffeedb)
+      }
+
+      headlightBeam.material.map?.dispose()
+      headlightBeam.material.map = makeHeadlightProjectionTexture(t)
+      headlightBeam.material.opacity = hb ? 0.85 : 0.15
+      headlightBeam.material.needsUpdate = true
+
+      taillightBeam.material.opacity = hb ? 0.75 : 0.15
+      taillightBeam.material.needsUpdate = true
+    }
+    updateThemeRef.current = applyTheme
+
     let carRig: CarRig | null = null
+
+    const applyPaint = (finish: PaintFinish) => {
+      const cfg = PAINT_CONFIGS[finish]
+      if (carRig) {
+        for (const mat of carRig.paintMaterials) {
+          mat.color.set(cfg.hex)
+          mat.roughness = cfg.roughness
+          mat.metalness = cfg.metalness
+          mat.clearcoat = cfg.clearcoat
+          mat.needsUpdate = true
+        }
+      }
+    }
+    updatePaintRef.current = applyPaint
 
     /* ── Model streaming — REAL progress % into the loading overlay ──
      * GLTFLoader.load()'s onProgress is unreliable (Content-Length is lost
@@ -719,55 +1168,43 @@ export default function ScrollExperience() {
      * header (falling back to an asymptotic trickle), hand the buffer to
      * GLTFLoader.parse with the MeshoptDecoder, then fade the overlay.
      * The car settle-in doubles as the reveal beat after the fade. */
-    const t0 = performance.now()
-    const setProgress = (fraction: number) => {
-      const pct = Math.min(100, Math.round(fraction * 100))
-      loaderBar.style.width = `${pct}%`
-      loaderPct.textContent = String(pct) // JSX renders the trailing "%"
-    }
-
     ;(async () => {
       try {
-        const res = await fetch(MODEL_URL)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const total = Number(res.headers.get('content-length') ?? 0)
-        const chunks: Uint8Array[] = []
-        let loaded = 0
-        if (res.body && total > 0) {
-          const reader = res.body.getReader()
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            chunks.push(value)
-            loaded += value.length
-            if (!disposed) setProgress(loaded / total)
-          }
-        } else if (res.body) {
-          // No length header: stream what we can, trickle the visual % so
-          // the bar never lies about being stuck at a wrong 100%.
-          const reader = res.body.getReader()
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            chunks.push(value)
-            loaded += value.length
-            if (!disposed) setProgress((1 - Math.exp(-loaded / (1.2 * 1024 * 1024))) * 0.9)
+        let arrayBuffer: ArrayBuffer | null = null
+
+        // Try CacheStorage first for instant loading
+        if (typeof window !== 'undefined' && 'caches' in window) {
+          try {
+            const cache = await caches.open('bmw-m5-cs-cache-v1')
+            const match = await cache.match(MODEL_URL)
+            if (match) {
+              arrayBuffer = await match.arrayBuffer()
+            } else {
+              const netRes = await fetch(MODEL_URL)
+              if (netRes.ok) {
+                cache.put(MODEL_URL, netRes.clone()).catch(() => {})
+                arrayBuffer = await netRes.arrayBuffer()
+              }
+            }
+          } catch {
+            // Fallback gracefully to network fetch
           }
         }
 
-        const buffer = new Uint8Array(loaded)
-        let offset = 0
-        for (const c of chunks) {
-          buffer.set(c, offset)
-          offset += c.length
+        if (!arrayBuffer) {
+          const res = await fetch(MODEL_URL)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          arrayBuffer = await res.arrayBuffer()
         }
 
-        const loader = new GLTFLoader()
-        loader.setMeshoptDecoder(MeshoptDecoder) // EXT_meshopt_compression
-        const gltf = await loader.parseAsync(buffer.buffer, '')
         if (disposed) return
 
-        carRig = buildCarRig(gltf.scene)
+        const loader = new GLTFLoader()
+        loader.setMeshoptDecoder(MeshoptDecoder)
+        const gltf = await loader.parseAsync(arrayBuffer, '')
+        if (disposed) return
+
+        carRig = buildCarRig(gltf.scene, paint)
 
         // Measure + detect BEFORE parenting: Box3.setFromObject() works in
         // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
@@ -809,7 +1246,7 @@ export default function ScrollExperience() {
         // transparent floor as a soft showroom reflection (desktop only;
         // the doubled vertex load isn't worth it on phones).
         if (FLOOR_REFLECTION && window.innerWidth >= 768) {
-          const mirrorRig = buildCarRig(gltf.scene)
+          const mirrorRig = buildCarRig(gltf.scene, paint)
           mirrorRig.car.scale.y = -1
           mirrorRig.car.traverse((obj) => {
             if (!(obj instanceof THREE.Mesh)) return
@@ -828,36 +1265,106 @@ export default function ScrollExperience() {
           carGroup.add(mirrorRig.car)
         }
 
-        // Hold the overlay ≥0.8 s so fast connections see a deliberate
-        // beat, not a flash; then fade it and let the car settle in.
-        const elapsed = performance.now() - t0
-        const hold = Math.max(0, 800 - elapsed)
-        window.setTimeout(() => {
-          if (disposed) return
-          gsap.to(loaderEl, {
-            autoAlpha: 0,
-            duration: prefersReduced ? 0.01 : 0.7,
-            ease: 'power1.inOut',
-            onComplete: () => {
-              loaderEl.style.display = 'none'
-            },
-          })
-          gsap.to(carRig!.car.position, { y: 0, duration: 0.9, ease: 'power2.out' })
-        }, hold)
+        gsap.to(carRig!.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
       } catch (err) {
         console.warn('[scroll-experience] car model failed to load:', err)
-        if (disposed) return
-        loaderMsg.textContent = 'The 3D model could not be loaded — please check your connection and refresh.'
-        loaderBar.style.backgroundColor = '#a3222c'
       }
     })()
 
-    /* ── Camera rig state — animated by GSAP, applied every frame ──── */
+    /* ── Camera rig state — animated by GSAP or Orbit Drag ─────────── */
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
-    const applyCamera = () => {
-      camera.position.set(cam.px, cam.py, cam.pz)
-      camera.lookAt(cam.tx, cam.ty, cam.tz) // target tracked every frame
+
+    let isOrbitActive = false
+    const orbitState = {
+      theta: Math.PI * 0.28,
+      phi: Math.PI * 0.38,
+      radius: 7.2,
+      targetRadius: 7.2,
+      targetTheta: Math.PI * 0.28,
+      targetPhi: Math.PI * 0.38,
+      isDragging: false,
+      lastX: 0,
+      lastY: 0,
     }
+
+    toggleOrbitRef.current = (active: boolean) => {
+      isOrbitActive = active
+      if (active) {
+        const dx = camera.position.x
+        const dy = camera.position.y - 0.6
+        const dz = camera.position.z
+        orbitState.radius = Math.max(4.0, Math.min(12.0, Math.sqrt(dx * dx + dy * dy + dz * dz)))
+        orbitState.targetRadius = orbitState.radius
+        orbitState.theta = Math.atan2(dx, dz)
+        orbitState.targetTheta = orbitState.theta
+        orbitState.phi = Math.acos(Math.max(-0.95, Math.min(0.95, dy / orbitState.radius)))
+        orbitState.targetPhi = orbitState.phi
+      }
+    }
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (!isOrbitActive) return
+      orbitState.isDragging = true
+      orbitState.lastX = e.clientX
+      orbitState.lastY = e.clientY
+    }
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (isOrbitActive && orbitState.isDragging) {
+        const dx = e.clientX - orbitState.lastX
+        const dy = e.clientY - orbitState.lastY
+        orbitState.targetTheta -= dx * 0.007
+        orbitState.targetPhi = Math.max(0.12, Math.min(Math.PI / 2 - 0.04, orbitState.targetPhi - dy * 0.006))
+        orbitState.lastX = e.clientX
+        orbitState.lastY = e.clientY
+      }
+    }
+
+    const onPointerUp = () => {
+      orbitState.isDragging = false
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      if (!isOrbitActive) return
+      orbitState.targetRadius = Math.max(3.8, Math.min(13.5, orbitState.targetRadius + e.deltaY * 0.006))
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    canvas.addEventListener('wheel', onWheel, { passive: true })
+
+    const applyCamera = () => {
+      if (isOrbitActive) {
+        orbitState.theta += (orbitState.targetTheta - orbitState.theta) * 0.08
+        orbitState.phi += (orbitState.targetPhi - orbitState.phi) * 0.08
+        orbitState.radius += (orbitState.targetRadius - orbitState.radius) * 0.08
+
+        const px = orbitState.radius * Math.sin(orbitState.phi) * Math.sin(orbitState.theta)
+        const py = 0.6 + orbitState.radius * Math.cos(orbitState.phi)
+        const pz = orbitState.radius * Math.sin(orbitState.phi) * Math.cos(orbitState.theta)
+
+        camera.position.set(px, py, pz)
+        camera.lookAt(0, 0.6, 0)
+      } else {
+        const m = mouseRef.current
+        m.x += (m.targetX - m.x) * 0.05
+        m.y += (m.targetY - m.y) * 0.05
+
+        const pOffsetX = m.x * 0.28
+        const pOffsetY = -m.y * 0.16
+        const pOffsetZ = m.x * 0.18
+
+        camera.position.set(cam.px + pOffsetX, cam.py + pOffsetY, cam.pz + pOffsetZ)
+        camera.lookAt(cam.tx + pOffsetX * 0.25, cam.ty + pOffsetY * 0.15, cam.tz)
+      }
+    }
+
+    const onMouseMove = (e: MouseEvent) => {
+      mouseRef.current.targetX = (e.clientX / window.innerWidth - 0.5) * 2
+      mouseRef.current.targetY = (e.clientY / window.innerHeight - 0.5) * 2
+    }
+    window.addEventListener('mousemove', onMouseMove)
 
     /* ── GSAP ScrollTrigger choreography ─────────────────────────────
      * One master timeline, scrubbed by scroll. Positions are expressed in
@@ -881,27 +1388,40 @@ export default function ScrollExperience() {
           start: 'top top',
           end: 'bottom bottom',
           scrub: prefersReduced ? true : 1.2, // momentum catch-up
+          onUpdate: (self) => {
+            const p = self.progress
+            setScrollProgress(p)
+            if (p < 0.2) {
+              setActiveSection('overview')
+            } else if (p < 0.5) {
+              setActiveSection('performance')
+            } else if (p < 0.8) {
+              setActiveSection('design')
+            } else {
+              setActiveSection('specs')
+            }
+          },
         },
       })
 
       /* Act I — HERO → FRONT (0 → 0.30) */
       tl.to(cam, { ...K.front, duration: 0.3 }, 0)
-      tl.to(heroLayer, { autoAlpha: 0, y: -42, duration: 0.11, ease: 'power1.in' }, 0.02)
-      tl.fromTo(capFront, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.17)
-      tl.to(capFront, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.36)
+      tl.to(heroLayer, { autoAlpha: 0, y: -36, duration: 0.12, ease: 'power1.in' }, 0.02)
+      tl.fromTo(capFront, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.09, ease: 'power2.out' }, 0.15)
+      tl.to(capFront, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.08, ease: 'power1.in' }, 0.38)
 
       /* dwell on the front bumper (0.30 → 0.42) — no camera tweens */
 
       /* Act II — FRONT → REAR (0.42 → 0.72) */
       tl.to(cam, { ...K.rear, duration: 0.3 }, 0.42)
-      tl.fromTo(capRear, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.09, ease: 'power2.out' }, 0.58)
-      tl.to(capRear, { autoAlpha: 0, y: -22, duration: 0.08, ease: 'power1.in' }, 0.78)
+      tl.fromTo(capRear, { autoAlpha: 0, y: 32, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.09, ease: 'power2.out' }, 0.54)
+      tl.to(capRear, { autoAlpha: 0, y: -24, scale: 0.98, duration: 0.08, ease: 'power1.in' }, 0.78)
 
       /* dwell on the rear (0.72 → 0.84) */
 
       /* Act III — REAR → OUTRO (0.84 → 1.00) + closing card */
       tl.to(cam, { ...K.outro, duration: 0.16 }, 0.84)
-      tl.fromTo(endCard, { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: 0.1, ease: 'power2.out' }, 0.9)
+      tl.fromTo(endCard, { autoAlpha: 0, y: 28, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.1, ease: 'power2.out' }, 0.87)
 
       return tl
     }
@@ -930,6 +1450,7 @@ export default function ScrollExperience() {
     if (!prefersReduced) {
       lenis = new Lenis({ duration: 1.15, smoothWheel: true })
       lenis.on('scroll', ScrollTrigger.update)
+      lenisInstanceRef.current = lenis
     }
 
     const tick = (time: number) => {
@@ -959,7 +1480,13 @@ export default function ScrollExperience() {
     /* ── Teardown — no memory leaks ────────────────────────────────── */
     return () => {
       disposed = true
+      lenisInstanceRef.current = null
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      canvas.removeEventListener('wheel', onWheel)
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('mousemove', onMouseMove)
       window.clearTimeout(refreshTimer)
       mm.revert() // kills the ScrollTriggers/tweens created per breakpoint
       ScrollTrigger.getAll().forEach((st) => st.kill()) // safety net
@@ -1006,65 +1533,64 @@ export default function ScrollExperience() {
 
       {/* Fixed UI overlay */}
       <div className="pointer-events-none fixed inset-0 z-10">
-        {/* ── Navbar (persists through the whole sequence) ── */}
-        <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-4 px-[clamp(20px,5.5vw,80px)] py-[clamp(16px,3vw,32px)]">
-          <a href="#" aria-label="BMW M5 CS — home" className="text-[#f5f2ea] hover:text-[#f5f2ea]">
-            <svg
-              width="129"
-              height="36"
-              viewBox="0 0 161 45"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-              focusable="false"
-            >
-              {/* BMW roundel */}
-              <circle cx="22.5" cy="22.5" r="21.5" fill="#0b0d10" />
-              <circle cx="22.5" cy="22.5" r="21.25" stroke="rgba(255,255,255,0.35)" strokeWidth="0.5" />
-              <circle cx="22.5" cy="22.5" r="15.2" fill="#f2f4f6" />
-              <path d="M22.5 7.3A15.2 15.2 0 0 0 7.3 22.5L22.5 22.5Z" fill="#1C69D4" />
-              <path d="M37.7 22.5A15.2 15.2 0 0 1 22.5 37.7L22.5 22.5Z" fill="#1C69D4" />
-              <defs>
-                <path id="bmw-arc" d="M11.2 11.2A16 16 0 0 1 33.8 11.2" fill="none" />
-              </defs>
-              <text fontSize="5.2" fontWeight="700" fill="#f5f2ea" letterSpacing="2">
-                <textPath href="#bmw-arc" startOffset="50%" textAnchor="middle">
-                  BMW
-                </textPath>
-              </text>
-              {/* M tricolor stripes */}
-              <path d="M51 12.5L56.5 12.5L49 32.5L43.5 32.5Z" fill="#009ADA" />
-              <path d="M61.5 12.5L67 12.5L59.5 32.5L54 32.5Z" fill="#2B3990" />
-              <path d="M72 12.5L77.5 12.5L70 32.5L64.5 32.5Z" fill="#E4002B" />
-              {/* M5 CS wordmark */}
-              <text
-                x="84"
-                y="31"
-                fontSize="21"
-                fontWeight="800"
-                fontStyle="italic"
-                letterSpacing="0.5"
-                fill="currentColor"
-              >
-                M5 CS
-              </text>
-            </svg>
-          </a>
+        {/* ── Navbar (100% Transparent Header with Official BMW Logo) ── */}
+        <header className="pointer-events-auto fixed top-0 inset-x-0 z-30 flex items-center justify-between bg-transparent px-[clamp(20px,5vw,64px)] py-4 transition-all">
+          {/* Brand logo */}
+          <button
+            type="button"
+            onClick={() => scrollToSection('overview')}
+            aria-label="BMW M5 CS — return to overview"
+            className="group flex items-center gap-3 text-left transition-transform active:scale-95 cursor-pointer"
+          >
+            <div className="relative flex items-center gap-3">
+              {/* Authentic BMW Roundel Logo */}
+              <img
+                src="/bmw-logo.svg"
+                alt="BMW Logo"
+                width={38}
+                height={38}
+                className="h-[38px] w-[38px] object-contain select-none filter drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]"
+              />
 
-          <nav aria-label="Primary" className="flex flex-wrap items-center gap-[clamp(16px,2.8vw,40px)]">
-            {NAV_LINKS.map((label) => (
-              <a
-                key={label}
-                href="#"
-                className="text-[13px] font-normal tracking-[0.02em] text-white transition-colors hover:text-white/80"
-              >
-                {label}
-              </a>
-            ))}
-            <a href="#" className="signin-btn">
-              Book a Drive
-            </a>
+              {/* Brand wordmark */}
+              <div className="flex items-center [text-shadow:0_2px_10px_rgba(0,0,0,0.8)]">
+                <span className="text-[17px] font-black italic tracking-wider text-white">M5 CS</span>
+              </div>
+            </div>
+          </button>
+
+          {/* Nav chapter pills */}
+          <nav aria-label="Experience Navigation" className="hidden md:flex items-center gap-1 rounded-full border border-white/15 bg-black/30 p-1 shadow-2xl backdrop-blur-md">
+            {NAV_ITEMS.map((item) => {
+              const isActive = activeSection === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => scrollToSection(item.id)}
+                  className={`relative rounded-full px-4 py-1.5 text-[12px] font-medium tracking-[0.03em] transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-black font-semibold shadow-[0_2px_12px_rgba(255,255,255,0.25)]'
+                      : 'text-white/75 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
           </nav>
+
+          {/* Right Action: Book a Drive CTA */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowBookingModal(true)}
+              className="group relative flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/30 hover:bg-black/45 px-5 py-2 text-[12px] font-medium tracking-wide text-white shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-[#E4002B] animate-pulse" />
+              <span>Book a Drive</span>
+            </button>
+          </div>
         </header>
 
         {/* ── Hero layer — fades out as the camera leaves the hero state ── */}
@@ -1095,7 +1621,11 @@ export default function ScrollExperience() {
               stripped of 70 kg and sharpened on the Nürburgring.
             </p>
 
-            <a href="#" className="cta-btn pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => scrollToSection('performance')}
+              className="cta-btn pointer-events-auto cursor-pointer"
+            >
               Explore the M5 CS
               <svg
                 width="18"
@@ -1112,7 +1642,7 @@ export default function ScrollExperience() {
                 <path d="M4 12h15" />
                 <path d="M13.5 5.5 20 12l-6.5 6.5" />
               </svg>
-            </a>
+            </button>
           </section>
         </div>
 
@@ -1156,8 +1686,12 @@ export default function ScrollExperience() {
           <h2 className="m-0 mt-4 text-[clamp(24px,4.5vw,40px)] font-semibold tracking-[-0.02em] text-[#f7f4ec]">
             The most powerful M5 ever built.
           </h2>
-          <a href="#" className="cta-btn pointer-events-auto mt-8">
-            Reserve Yours
+          <button
+            type="button"
+            onClick={() => setShowBookingModal(true)}
+            className="cta-btn pointer-events-auto mt-8 cursor-pointer"
+          >
+            <span>Reserve Yours</span>
             <svg
               width="18"
               height="18"
@@ -1173,50 +1707,335 @@ export default function ScrollExperience() {
               <path d="M4 12h15" />
               <path d="M13.5 5.5 20 12l-6.5 6.5" />
             </svg>
-          </a>
+          </button>
         </div>
 
-        {/* CC-BY-4.0 license attribution (required by the model author) */}
-        <p className="absolute bottom-2 left-4 m-0 text-[10px] leading-none text-white/25">
-          BMW M5 CS (F90) model by fvrenbld · CC-BY-4.0
-        </p>
+        {/* ── Modern, understated automotive controls dock (hidden by default with toggle button) ── */}
+        {!showVehicleControls ? (
+          <>
+            {/* Desktop show button */}
+            <button
+              type="button"
+              onClick={() => setShowVehicleControls(true)}
+              className="pointer-events-auto absolute bottom-6 right-6 hidden sm:flex items-center gap-2.5 rounded-full border border-white/15 bg-[#080a0f]/80 hover:bg-[#080a0f]/95 hover:border-white/30 px-3.5 py-2 text-[12px] font-medium text-white/85 hover:text-white shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-md transition-all active:scale-95 cursor-pointer"
+              aria-label="Show vehicle paint and 360° controls"
+              title="Customize Paint & 360° View"
+            >
+              <span
+                className="h-3.5 w-3.5 rounded-full border border-white/30 shadow-sm"
+                style={{ backgroundColor: PAINT_CONFIGS[paint].hex }}
+              />
+              <span>Paint &amp; 360°</span>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-white/60"
+              >
+                <path d="m18 15-6-6-6 6" />
+              </svg>
+            </button>
+
+            {/* Mobile show button */}
+            <button
+              type="button"
+              onClick={() => setShowVehicleControls(true)}
+              className="pointer-events-auto absolute bottom-5 right-4 flex sm:hidden items-center gap-2 rounded-full border border-white/15 bg-[#080a0f]/90 px-3 py-1.5 text-[11px] font-medium text-white/80 shadow-lg backdrop-blur-md cursor-pointer"
+              title="Paint & 360°"
+              aria-label="Show vehicle controls"
+            >
+              <span
+                className="h-3 w-3 rounded-full border border-white/30"
+                style={{ backgroundColor: PAINT_CONFIGS[paint].hex }}
+              />
+              <span>Paint &amp; 360°</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="m18 15-6-6-6 6" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Desktop controls dock */}
+            <aside
+              aria-label="Vehicle Controls and Finishes"
+              className="pointer-events-auto absolute bottom-6 right-6 hidden sm:flex items-center gap-4 rounded-full border border-white/15 bg-[#080a0f]/90 px-4 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-md animate-in fade-in duration-200"
+            >
+              {/* Paint Finish Selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/40">
+                  Paint
+                </span>
+                <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Exterior Paint Finish">
+                  {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((finish) => {
+                    const cfg = PAINT_CONFIGS[finish]
+                    const isSelected = paint === finish
+                    return (
+                      <button
+                        key={finish}
+                        type="button"
+                        onClick={() => handlePaintChange(finish)}
+                        title={cfg.name}
+                        aria-label={cfg.name}
+                        aria-checked={isSelected}
+                        role="radio"
+                        className={`relative flex h-5 w-5 items-center justify-center rounded-full transition-all cursor-pointer ${
+                          isSelected
+                            ? 'ring-1.5 ring-white ring-offset-2 ring-offset-[#080a0f]'
+                            : 'opacity-60 hover:opacity-100 hover:scale-110'
+                        }`}
+                      >
+                        <span
+                          className="h-full w-full rounded-full border border-white/20"
+                          style={{ backgroundColor: cfg.hex }}
+                        />
+                      </button>
+                    )
+                  })}
+                </div>
+                <span className="text-[11px] font-normal text-white/70 pl-0.5">
+                  {PAINT_CONFIGS[paint].name}
+                </span>
+              </div>
+
+              <div className="h-3.5 w-px bg-white/15" aria-hidden="true" />
+
+              {/* 360° Free Camera Toggle */}
+              <button
+                type="button"
+                onClick={handleOrbitToggle}
+                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium tracking-wide transition-all cursor-pointer ${
+                  orbitMode
+                    ? 'bg-white/20 text-white'
+                    : 'text-white/60 hover:text-white'
+                }`}
+                title="Toggle 360° free orbit inspection"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                </svg>
+                <span>{orbitMode ? 'Exit 360°' : '360° View'}</span>
+              </button>
+
+              <div className="h-3.5 w-px bg-white/15" aria-hidden="true" />
+
+              {/* Hide / Close Button */}
+              <button
+                type="button"
+                onClick={() => setShowVehicleControls(false)}
+                className="rounded-full p-1 text-white/45 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                title="Hide controls"
+                aria-label="Hide controls"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </aside>
+
+            {/* Mobile controls bar */}
+            <aside
+              aria-label="Mobile Vehicle Controls"
+              className="pointer-events-auto absolute bottom-5 inset-x-4 flex sm:hidden items-center justify-between rounded-2xl border border-white/15 bg-[#080a0f]/95 px-3.5 py-2 shadow-xl backdrop-blur-md animate-in fade-in duration-200"
+            >
+              <div className="flex items-center gap-1.5">
+                {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((finish) => {
+                  const cfg = PAINT_CONFIGS[finish]
+                  const isSelected = paint === finish
+                  return (
+                    <button
+                      key={finish}
+                      type="button"
+                      onClick={() => handlePaintChange(finish)}
+                      title={cfg.name}
+                      aria-label={cfg.name}
+                      className={`h-5 w-5 rounded-full border border-white/20 transition-all ${
+                        isSelected ? 'ring-1.5 ring-white' : 'opacity-60'
+                      }`}
+                      style={{ backgroundColor: cfg.hex }}
+                    />
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOrbitToggle}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all ${
+                    orbitMode ? 'bg-white/20 text-white' : 'text-white/60'
+                  }`}
+                >
+                  {orbitMode ? 'Scroll' : '360°'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowVehicleControls(false)}
+                  className="rounded-full p-1 text-white/50 hover:text-white cursor-pointer"
+                  title="Hide"
+                  aria-label="Hide"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </aside>
+          </>
+        )}
       </div>
 
-      {/* ── Loading overlay — real fetch % of the meshopt GLB, then fades ── */}
-      <div
-        ref={loaderRef}
-        role="status"
-        aria-live="polite"
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#050608] px-6 text-center"
-      >
-        <div aria-hidden="true" className="mb-5 flex items-center gap-2.5">
-          <svg width="34" height="34" viewBox="0 0 45 45" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="22.5" cy="22.5" r="21.5" fill="#0b0d10" />
-            <circle cx="22.5" cy="22.5" r="21.25" stroke="rgba(255,255,255,0.35)" strokeWidth="0.5" />
-            <circle cx="22.5" cy="22.5" r="15.2" fill="#f2f4f6" />
-            <path d="M22.5 7.3A15.2 15.2 0 0 0 7.3 22.5L22.5 22.5Z" fill="#1C69D4" />
-            <path d="M37.7 22.5A15.2 15.2 0 0 1 22.5 37.7L22.5 22.5Z" fill="#1C69D4" />
-          </svg>
-          <svg width="24" height="16" viewBox="0 0 32 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M5.5 0h5.5L5.5 21H0Z" fill="#009ADA" />
-            <path d="M16 0h5.5L16 21h-5.5Z" fill="#2B3990" />
-            <path d="M26.5 0H32L26.5 21H21Z" fill="#E4002B" />
-          </svg>
-          <span className="text-[20px] font-extrabold italic leading-none tracking-[0.01em] text-[#f5f2ea]">M5 CS</span>
+      {/* ── Test Drive Reservation Modal ── */}
+      {showBookingModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="booking-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-200"
+        >
+          <div className="relative w-full max-w-lg rounded-3xl border border-white/20 bg-[#0c0f16] p-6 sm:p-8 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => {
+                setShowBookingModal(false)
+                setBookingConfirmed(false)
+              }}
+              aria-label="Close modal"
+              className="absolute top-5 right-5 rounded-full p-2 text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+
+            {bookingConfirmed ? (
+              <div className="py-6 text-center">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#009ADA]/20 text-[#009ADA] border border-[#009ADA]/40">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                </div>
+                <h3 className="m-0 mb-2 text-[22px] font-bold text-white">Reservation Request Confirmed</h3>
+                <p className="m-0 mb-6 text-[14px] text-white/70 leading-relaxed">
+                  A certified BMW M Client Advisor will reach out to coordinate your private session with the M5 CS in {PAINT_CONFIGS[paint].name}.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBookingModal(false)
+                    setBookingConfirmed(false)
+                  }}
+                  className="rounded-full bg-white px-6 py-2.5 text-[13px] font-semibold text-black hover:bg-white/90 transition-all cursor-pointer"
+                >
+                  Return to Experience
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#FFB733]" />
+                    <span className="text-[11px] font-bold uppercase tracking-[0.25em] text-[#e8ddc4]">
+                      Private M Client Experience
+                    </span>
+                  </div>
+                  <h3 id="booking-title" className="m-0 text-[24px] font-bold text-white tracking-tight">
+                    Reserve Your M5 CS Session
+                  </h3>
+                  <p className="m-0 mt-1 text-[13px] text-white/60">
+                    Selected finish: <strong className="text-white">{PAINT_CONFIGS[paint].name}</strong> · 627 HP Twin-Turbo V8
+                  </p>
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    setBookingConfirmed(true)
+                  }}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
+                      Full Name
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="e.g. Marcus Vance"
+                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      required
+                      type="email"
+                      placeholder="m.vance@executive.com"
+                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
+                        City / Region
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        placeholder="Munich, Germany"
+                        className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
+                        Preferred Paint
+                      </label>
+                      <select
+                        value={paint}
+                        onChange={(e) => handlePaintChange(e.target.value as PaintFinish)}
+                        className="w-full rounded-xl border border-white/15 bg-[#121620] px-3.5 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none"
+                      >
+                        {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((p) => (
+                          <option key={p} value={p}>
+                            {PAINT_CONFIGS[p].name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full mt-2 rounded-xl bg-gradient-to-r from-[#1C69D4] to-[#009ADA] hover:from-[#185ec2] hover:to-[#0089c2] py-3 text-[13px] font-semibold text-white shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    Confirm Private Session Request
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
         </div>
-        <p ref={loaderMsgRef} className="m-0 mb-6 text-[12px] uppercase tracking-[0.3em] text-white/60">
-          Preparing your M5 CS
-        </p>
-        <div className="relative h-[3px] w-60 overflow-hidden rounded-full bg-white/10">
-          <div
-            ref={loaderBarRef}
-            className="absolute inset-y-0 left-0 w-0 rounded-full bg-[#FFB733] transition-[width] duration-200 ease-out"
-          />
-        </div>
-        <p className="m-0 mt-3 text-[12px] font-medium tabular-nums text-[#e8ddc4]">
-          <span ref={loaderPctRef}>0</span>%
-        </p>
-      </div>
+      )}
     </main>
   )
 }
