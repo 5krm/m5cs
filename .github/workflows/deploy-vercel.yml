@@ -1,0 +1,66 @@
+name: Deploy to Vercel
+
+# Builds and deploys the app to Vercel production.
+#
+# Setup (once): add a repository secret named VERCEL_TOKEN
+#   GitHub → repository → Settings → Secrets and variables → Actions → New repository secret
+#   Value: a token from https://vercel.com/account/tokens
+#
+# Without that secret this workflow exits cleanly without deploying anything, so it is safe to
+# keep in the repository even before Vercel is configured.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for VERCEL_TOKEN
+        id: guard
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::warning title=Skipping deploy::The VERCEL_TOKEN secret is not set for this repository. Add it under Settings → Secrets and variables → Actions to enable deploys."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip == 'false'
+        run: npm ci
+
+      - name: Build (fails the job early if the app does not compile)
+        if: steps.guard.outputs.skip == 'false'
+        run: npm run build
+
+      - name: Install Vercel CLI
+        if: steps.guard.outputs.skip == 'false'
+        run: npm install --global vercel@latest
+
+      - name: Deploy to Vercel (production)
+        if: steps.guard.outputs.skip == 'false'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        # --yes accepts the auto-detected Next.js defaults and creates the project on first run.
+        run: vercel deploy --prod --yes --token "$VERCEL_TOKEN"

@@ -1,13 +1,27 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-// Inter — Google Fonts, used for ALL text.
-// next/font self-hosts the font (variable wght axis 100–900) with zero layout shift.
-const inter = Inter({
-  subsets: ["latin"],
+// Inter — used for ALL text.
+// Self-hosted via next/font/local (variable wght axis 100–900, Latin subset).
+// Vendored from @fontsource-variable/inter v5.3.0 (Inter, SIL OFL 1.1 — see
+// src/app/fonts/LICENSE.txt) so the build never depends on fonts.googleapis.com.
+const inter = localFont({
+  src: [
+    {
+      path: "./fonts/inter-latin-wght-normal.woff2",
+      weight: "100 900",
+      style: "normal",
+    },
+    {
+      path: "./fonts/inter-latin-wght-italic.woff2",
+      weight: "100 900",
+      style: "italic",
+    },
+  ],
   variable: "--font-inter",
   display: "swap",
+  fallback: ["system-ui", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
 });
 
 export const metadata: Metadata = {
