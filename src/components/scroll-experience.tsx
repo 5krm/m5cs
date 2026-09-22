@@ -309,6 +309,48 @@ function buildCarRig(source: THREE.Object3D): CarRig {
   return { car }
 }
 
+/**
+ * Finds the four wheel-hub XZ positions from the model's own geometry.
+ * Vertices that actually touch the ground (y < 6 % of the car height) are
+ * almost exclusively tire contact patches; clustered by XZ quadrant their
+ * mean IS the hub. This survives merged / misleadingly named meshes — this
+ * M5 packs several tires into one "Meshestires" mesh and puts wheel covers
+ * under a "door" material — which per-mesh box heuristics do not. Validated
+ * offline against the decoded GLB: hubs land within 2 cm of the true axle
+ * centers. Falls back to M5 CS proportions when a quadrant comes up empty.
+ * Call with the rig STILL UNPARENTED so world space == rig-local space.
+ */
+function detectWheelHubs(root: THREE.Object3D, size: THREE.Vector3): Array<[number, number]> {
+  root.updateMatrixWorld(true)
+  const yMax = size.y * 0.06
+  const quads = [0, 1, 2, 3].map(() => ({ x: 0, z: 0, n: 0 }))
+  const v = new THREE.Vector3()
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || !obj.visible) return
+    const attr = obj.geometry.getAttribute('position')
+    if (!attr) return
+    for (let i = 0; i < attr.count; i++) {
+      v.fromBufferAttribute(attr, i)
+      obj.localToWorld(v)
+      if (v.y > yMax) continue
+      const q = (v.x > 0 ? 1 : 0) + (v.z > 0 ? 2 : 0)
+      const bucket = quads[q]
+      bucket.x += v.x
+      bucket.z += v.z
+      bucket.n++
+    }
+  })
+  const hubs = quads.map((b) => (b.n > 0 ? ([b.x / b.n, b.z / b.n] as [number, number]) : null))
+  if (hubs.every((h) => h !== null)) return hubs as Array<[number, number]>
+  // Fallback — normalized M5 CS proportions (axles ≈ ±0.30 L, track ≈ ±0.38 W)
+  return [
+    [-0.3 * size.x, 0.38 * size.z],
+    [-0.3 * size.x, -0.38 * size.z],
+    [0.3 * size.x, 0.38 * size.z],
+    [0.3 * size.x, -0.38 * size.z],
+  ]
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * Camera-rig math
  * ══════════════════════════════════════════════════════════════════════ */
@@ -726,11 +768,28 @@ export default function ScrollExperience() {
         if (disposed) return
 
         carRig = buildCarRig(gltf.scene)
+
+        // Measure + detect BEFORE parenting: Box3.setFromObject() works in
+        // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
+        // into the footprint — that inflates width by ~35 % and shoved the
+        // old patches ~0.3 m outboard of the tires. Rig unparented ⇒ world
+        // space == rig-local space.
+        const footprint = new THREE.Box3().setFromObject(carRig.car)
+        const carSize = footprint.getSize(new THREE.Vector3())
+        const hubs = detectWheelHubs(carRig.car, carSize)
+
         carRig.car.position.y = -0.12
         carGroup.add(carRig.car)
 
-        // Per-wheel contact patches, positioned from the normalized
-        // footprint (≈ M5 CS proportions) so any model stays grounded.
+        // Hug the body-AO ellipse to the measured footprint (was a fixed
+        // TARGET_LENGTH-sized plane that spilled half a metre past the
+        // bumpers and read as a dark halo floating around the car).
+        contact.geometry.dispose()
+        contact.geometry = new THREE.PlaneGeometry(carSize.x * 1.02, carSize.z * 1.18)
+
+        // Per-wheel contact patches anchored at the detected hubs — each
+        // blob now sits centered under its tire instead of guessing from
+        // footprint fractions (the source mesh merges/misnames wheels).
         const wheelTex = makeWheelShadowTexture()
         const wheelShadowMat = new THREE.MeshBasicMaterial({
           map: wheelTex,
@@ -738,14 +797,8 @@ export default function ScrollExperience() {
           depthWrite: false,
           opacity: 0.78,
         })
-        const carSize = new THREE.Box3().setFromObject(carRig.car).getSize(new THREE.Vector3())
-        for (const [wx, wz] of [
-          [0.3 * carSize.x, 0.43 * carSize.z],
-          [0.3 * carSize.x, -0.43 * carSize.z],
-          [-0.3 * carSize.x, 0.43 * carSize.z],
-          [-0.3 * carSize.x, -0.43 * carSize.z],
-        ] as const) {
-          const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.62), wheelShadowMat)
+        for (const [wx, wz] of hubs) {
+          const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.5), wheelShadowMat)
           patch.rotation.x = -Math.PI / 2
           patch.position.set(wx, 0.011, wz)
           patch.renderOrder = 1
