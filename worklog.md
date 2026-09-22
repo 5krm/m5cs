@@ -151,3 +151,24 @@ Verification:
 Stage Summary:
 - Project state = c2609dd (studio era with drift smoke) committed as a new commit on main; previous timeline (Tasks 5–13) fully preserved in git history at 9d58218.
 - Production (Vercel) still serves the pre-revert deployment until the next `bunx vercel deploy --prod`.
+
+---
+Task ID: 15
+Agent: Z.ai Code (main agent)
+Task: On the reverted c2609dd base — (1) remove the car smoke, (2) make the car load fast, (3) take the background "to the next level"; per user follow-up: background must be a normal 3D rotating car studio with NO image assets.
+
+Work Log:
+- Smoke removal: deleted the entire tire-smoke system (SMOKE_* constants, GLSL shaders, SmokeParticle, createSmokeSystem, rear-tire anchors in buildCarRig, per-frame updateWorld), plus the idle sway and the headlight/taillight glow sprites. Car reads parked.
+- Fast load: reactivated the surviving meshopt scene.min.glb (3.19 MB, verified via gltf-transform inspect: EXT_meshopt_compression + KHR_mesh_quantization, all 89 material names intact); deleted scene.gltf/scene.bin (12.7 MB) from the repo; re-added the `meshoptimizer` dep; GLTFLoader.setMeshoptDecoder(MeshoptDecoder). Loading screen re-ported from the Task-13 implementation: fetch-stream byte counting → real % (roundel + M stripes + wordmark overlay, gold bar, min 0.8 s hold, 0.7 s fade, red-bar error path). Captured live at 73%.
+- Background v1 (rejected): generated two AI 360° equirect panoramas at 2048×1024 via z-ai SDK (CLI whitelist doesn't expose that size), integrated skybox+IBL... user redirected: "just a normal 3d car studio, don't use the images". Deleted the panoramas and the generator script.
+- Background v2 (shipped): procedural 3D showroom, zero image assets — restored canvas vignette + FogExp2 + RoomEnvironment PMREM IBL; three-point studio lights (warm key 380/cool rim/ambience); visible overhead softbox light strips (3 emissive slabs, desktop only — mobile's wider FOV catches them as slashes); showroom floor = semi-transparent dark slab (opacity 0.84) over a mirrored-car double (buildCarRig re-run, scale.y=-1, cloned DoubleSide materials, no shadows, desktop only) → soft configurator-style mirror reflection; warm floor pool; fake-AO contact blob under the car.
+- Also removed dead `src/components/bmw-drift-scene.tsx` (superseded since Task 3, referenced deleted scene.gltf).
+
+Verification:
+- lint 0/0; dev.log clean on fresh loads (transient Fast-Refresh lines only during editing).
+- Desktop 1280×800: loader at 73%, hero (grounded, pool light), front close-up — kidney grille + laserlights mirrored in the glossy floor (the money shot), rear diffuser/quad-exhaust with reflection, outro wide with full mirror double; reverse scrub rewinds.
+- Mobile 390×844: no overflow (390=390), hero + head-on front close-up grounded, no strips/mirror (by design), fresh-load console 0 errors/warnings.
+
+Stage Summary:
+- Shipped: smoke-free parked studio look, 3.2 MB meshopt model with real-% branded loading screen, and a procedural 3D showroom (mirror floor + softboxes + contact shadow) — no image assets anywhere in the scene.
+- Repo is 12.7 MB lighter (scene.gltf/scene.bin removed). Live GitHub push still blocked on a Contents:write token; production Vercel still serves the pre-revert build.

@@ -16,10 +16,10 @@
  *   0.42–0.72  FRONT → REAR   sweep along flank    rear caption in/out
  *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
  *
- * Backdrop: a 2048×1024 equirectangular rooftop-over-the-city panorama —
- * the SAME texture is the visible skybox AND the IBL source, so the paint
- * reflects the skyline behind the car. No smoke, no sway, no light sprites:
- * the car reads parked and grounded (shadow catcher + fake-AO blob).
+ * Backdrop: a procedural 3D showroom — dark reflective floor (mirrored-car
+ * double trick), overhead softbox light strips, canvas vignette, no image
+ * assets at all. No smoke, no sway, no sprites: the car reads parked and
+ * grounded (cast shadow + fake-AO blob).
  *
  * Loading: the meshopt-compressed GLB (3.2 MB vs 12.7 MB) is fetched with
  * a stream reader so the branded overlay shows the REAL byte %, then
@@ -34,6 +34,7 @@ import { useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { MeshoptDecoder } from 'meshoptimizer/decoder'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -43,13 +44,11 @@ import 'lenis/dist/lenis.css'
 /* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
 
 const MODEL_URL = '/models/bmw-m5-cs/scene.min.glb' // CC-BY-4.0 · fvrenbld — meshopt-compressed (3.2 MB)
-const ENV_URL = '/environment/rooftop_360.jpg' // 2048×1024 equirect rooftop night panorama
 const TARGET_LENGTH = 4.6 // car is normalized to this world length
 const FLIP_MODEL = false // set true if a swapped model faces backwards
 
-/** Panorama alignment — ✏️ tune after any backdrop swap (see scene setup) */
-const ENV_ROTATION_Y = -2.35 // yaw so the landmark tower sits behind the hero camera
-const BACKDROP_PITCH_X = 0.05 // tiny pitch: puts a touch more sky above the roofline
+/** Showroom floor reflection — mirrored car double (desktop only) */
+const FLOOR_REFLECTION = true
 
 /* ═══════════ 2. CAMERA KEYFRAMES — ✏️ EDIT HERE ══════════════════════
  * World space: car sits at the origin, nose pointing +X, ~4.6 units long,
@@ -104,6 +103,38 @@ function makeContactShadowTexture(): THREE.CanvasTexture {
   g.addColorStop(0.5, 'rgba(0,0,0,0.34)')
   g.addColorStop(0.8, 'rgba(0,0,0,0.1)')
   g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 256, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Dark seamless studio vignette used as scene.background */
+function makeStudioBackdropTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 1024
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(512, 430, 60, 512, 512, 760)
+  g.addColorStop(0, '#1d212b')
+  g.addColorStop(0.5, '#101218')
+  g.addColorStop(1, '#050608')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 1024, 1024)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Warm pool of showroom light on the floor under the car */
+function makeFloorPoolTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 256
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128)
+  g.addColorStop(0, 'rgba(255,244,224,0.9)')
+  g.addColorStop(0.45, 'rgba(255,244,224,0.28)')
+  g.addColorStop(1, 'rgba(255,244,224,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 256, 256)
   const tex = new THREE.CanvasTexture(canvas)
@@ -309,51 +340,29 @@ export default function ScrollExperience() {
     // filtered shadow path (renders soft contacts with a 2K map)
     renderer.shadowMap.type = THREE.PCFShadowMap
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.15 // lifts the night IBL without clipping the city lights
+    renderer.toneMappingExposure = 1.0
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
-    /* ── Scene: rooftop-over-the-city night panorama (skybox + IBL) ──
-     * The SAME equirect texture is the visible backdrop and the PMREM
-     * environment, so the metallic paint reflects exactly the skyline
-     * you see behind the car. Rotations align the landmark tower with
-     * the hero camera's sightline (✏️ tune ENV_ROTATION_Y after any
-     * backdrop swap). */
+    /* ── Scene: procedural 3D showroom (vignette + fog, no images) ──── */
     const scene = new THREE.Scene()
-    renderer.setClearColor(0x04050a, 1) // fallback until the panorama streams in
+    const backdropTex = makeStudioBackdropTexture()
+    scene.background = backdropTex
+    scene.fog = new THREE.FogExp2(0x050608, 0.04)
 
-    scene.backgroundRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0)
-    scene.environmentRotation.set(BACKDROP_PITCH_X, ENV_ROTATION_Y, 0) // keep reflections aligned
-
+    // Studio reflections via a self-contained PMREM environment (no HDR
+    // download) — this is what puts the softbox highlights in the paint.
     const pmrem = new THREE.PMREMGenerator(renderer)
-    let panoTex: THREE.Texture | null = null
-    let panoEnvRT: THREE.WebGLRenderTarget | null = null
-
-    new THREE.TextureLoader().load(
-      ENV_URL,
-      (tex) => {
-        if (disposed) {
-          tex.dispose()
-          return
-        }
-        tex.mapping = THREE.EquirectangularReflectionMapping // 2:1 photo → skybox + IBL
-        tex.colorSpace = THREE.SRGBColorSpace
-        tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
-        panoTex = tex
-        scene.background = tex
-        scene.backgroundIntensity = 1.0
-        panoEnvRT = pmrem.fromEquirectangular(tex) // roughness-aware reflections
-        scene.environment = panoEnvRT.texture
-      },
-      undefined,
-      (error) => console.warn('[scroll-experience] panorama failed to load:', error),
-    )
+    const envScene = new RoomEnvironment()
+    const envTex = pmrem.fromScene(envScene, 0.04).texture
+    scene.environment = envTex
+    ;(envScene as unknown as { dispose?: () => void }).dispose?.()
 
     /* ── Camera ────────────────────────────────────────────────────── */
     const camera = new THREE.PerspectiveCamera(FOV_DESKTOP, window.innerWidth / window.innerHeight, 0.1, 160)
 
-    /* ── Lights — cool night floodlight tuned for the panorama ─────── */
-    const key = new THREE.SpotLight(0xdfe9ff, 340) // cool moonlight — casts the contact shadows
-    key.position.set(3, 14, 4) // steep angle → tight shadow that hugs the tires
+    /* ── Lights — three-point studio rig ───────────────────────────── */
+    const key = new THREE.SpotLight(0xfff1dd, 380) // warm keylight — casts the contact shadow
+    key.position.set(7, 9, 5)
     key.angle = 0.55
     key.penumbra = 0.55
     key.decay = 2
@@ -366,27 +375,66 @@ export default function ScrollExperience() {
     key.target.position.set(0, 0.5, 0)
     scene.add(key, key.target)
 
-    const rim = new THREE.DirectionalLight(0x9fc0ee, 2.4) // moonlit edge light
+    const rim = new THREE.DirectionalLight(0xbfd0e8, 1.6) // cool rim separation
     rim.position.set(-8, 5, -6)
     scene.add(rim)
 
-    scene.add(new THREE.HemisphereLight(0x27364e, 0x0a0c10, 0.5)) // night sky / asphalt bounce
+    scene.add(new THREE.HemisphereLight(0x39404e, 0x0b0c10, 0.38)) // studio ambience
 
-    /* ── Floor — invisible shadow-catcher on the rooftop asphalt ─────
-     * GROUNDING comes from CAMERA GEOMETRY + this transparent catcher:
-     * keyframes stay raised and aimed down so the wheels land on the
-     * panorama's asphalt, and the catcher adds the real cast shadow.
-     * (A visible 3D floor disc was tried and removed — it always reads
-     * as a podium pasted over the photo's rooftop.)
-     * ✏️ If a shot floats: raise that key's pos[1] / lower its target[1]
-     * — do NOT grow this catcher into a visible disc. */
+    /* ── Overhead softbox light strips (visible studio architecture) ──
+     * Pure-emissive slabs; the paint's actual highlights come from the
+     * PMREM RoomEnvironment. These read as the studio in the background
+     * and fade into the fog with distance. Desktop only — on portrait
+     * phones the wider FOV catches them as odd slashes across the sky. */
+    if (window.innerWidth >= 768) {
+      const stripMat = new THREE.MeshBasicMaterial({ color: 0xd8dee9, side: THREE.DoubleSide })
+      for (const [sx, sz, sw] of [
+        [0, -3.4, 13],
+        [0, 0, 15],
+        [0, 3.4, 13],
+      ] as const) {
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(sw, 0.72), stripMat)
+        strip.position.set(sx, 5.35, sz)
+        strip.rotation.x = Math.PI / 2 // face down toward the car
+        scene.add(strip)
+      }
+    }
+
+    /* ── Floor — dark showroom slab with a reflection window ─────────
+     * The mirrored car double (added with the model, desktop only) sits
+     * just below y = 0; this semi-transparent floor blends it back at
+     * ~16% strength — the classic configurator mirror-floor look — while
+     * still receiving the real cast shadow. ✏️ If a shot floats, raise
+     * that key's pos[1] / lower its target[1]; keep the floor opaque-ish. */
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(7, 64),
-      new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.62 }),
+      new THREE.CircleGeometry(90, 72),
+      new THREE.MeshStandardMaterial({
+        color: 0x06070b,
+        roughness: 0.32,
+        metalness: 0.55,
+        envMapIntensity: 0.4,
+        transparent: true,
+        opacity: 0.84,
+      }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     scene.add(floor)
+
+    const poolTex = makeFloorPoolTexture()
+    const pool = new THREE.Mesh(
+      new THREE.PlaneGeometry(12, 12),
+      new THREE.MeshBasicMaterial({
+        map: poolTex,
+        transparent: true,
+        opacity: 0.04,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    pool.rotation.x = -Math.PI / 2
+    pool.position.y = 0.01
+    scene.add(pool)
 
     /* ── Car root + fake-AO contact blob (model streams in async) ──── */
     const carGroup = new THREE.Group()
@@ -464,6 +512,29 @@ export default function ScrollExperience() {
         carRig = buildCarRig(gltf.scene)
         carRig.car.position.y = -0.12
         carGroup.add(carRig.car)
+
+        // Mirrored double just below y = 0 — shows through the semi-
+        // transparent floor as a soft showroom reflection (desktop only;
+        // the doubled vertex load isn't worth it on phones).
+        if (FLOOR_REFLECTION && window.innerWidth >= 768) {
+          const mirrorRig = buildCarRig(gltf.scene)
+          mirrorRig.car.scale.y = -1
+          mirrorRig.car.traverse((obj) => {
+            if (!(obj instanceof THREE.Mesh)) return
+            obj.castShadow = false
+            obj.receiveShadow = false
+            const mats = Array.isArray(obj.material)
+              ? obj.material.map((m) => m.clone())
+              : [obj.material.clone()]
+            for (const m of mats) {
+              const std = m as THREE.MeshStandardMaterial
+              std.side = THREE.DoubleSide // negative scale flips winding
+              std.envMapIntensity = Math.min(0.5, (std.envMapIntensity ?? 1) * 0.6)
+            }
+            obj.material = Array.isArray(obj.material) ? mats : mats[0]
+          })
+          carGroup.add(mirrorRig.car)
+        }
 
         // Hold the overlay ≥0.8 s so fast connections see a deliberate
         // beat, not a flash; then fade it and let the car settle in.
@@ -614,8 +685,9 @@ export default function ScrollExperience() {
         if (Array.isArray(m)) m.forEach(disposeMat)
         else if (m) disposeMat(m)
       })
-      panoTex?.dispose()
-      panoEnvRT?.dispose()
+      backdropTex.dispose()
+      poolTex.dispose()
+      envTex.dispose()
       pmrem.dispose()
       renderer.forceContextLoss()
       renderer.dispose()
