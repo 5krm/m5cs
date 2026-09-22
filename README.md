@@ -219,6 +219,8 @@ and injects its own `PORT`/`NODE_ENV`. Don't add a custom build/output override.
 
 ### Option A — Import the Git repository (recommended, ~1 minute)
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/5krm/m5cs)
+
 1. Go to **<https://vercel.com/new>** and sign in (GitHub login is easiest).
 2. Under *Import Git Repository*, pick **`5krm/m5cs`** (authorise the Vercel GitHub App for the repo
    if asked — the repository is public, so any account can import it).
