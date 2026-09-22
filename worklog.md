@@ -172,3 +172,20 @@ Verification:
 Stage Summary:
 - Shipped: smoke-free parked studio look, 3.2 MB meshopt model with real-% branded loading screen, and a procedural 3D showroom (mirror floor + softboxes + contact shadow) — no image assets anywhere in the scene.
 - Repo is 12.7 MB lighter (scene.gltf/scene.bin removed). Live GitHub push still blocked on a Contents:write token; production Vercel still serves the pre-revert build.
+
+---
+Task ID: 16
+Agent: Z.ai Code (main agent)
+Task: Push everything to GitHub (5krm/BMW) with the user's new fine-grained PAT and open a pull request.
+
+Work Log:
+- Pre-flight: verified token authenticates as 5krm; GET /repos/5krm/BMW -> 200. Remote main held only stale UUID auto-checkpoints + init commits (missing all current work) — safe to overwrite.
+- Found local HEAD already contained the full Task-15 studio-v2 work (dfe5f74) plus an unfinished edge: fresh-load browser check surfaced `ReferenceError: updatePointScale is not defined` in onResize — a dangling leftover from the smoke-system removal (panoTex errors proved to be stale HMR-session tracker entries, not real).
+- Fixed: removed the dangling `updatePointScale()` call (src/components/scroll-experience.tsx), lint 0/0, committed as db5f808.
+- Verification: isolated brand-new agent-browser session -> fresh load + two viewport resizes (1440x900 <-> 1280x800) -> 0 real errors; showroom renders (mirror floor, softbox strips, hero copy) and the real-% loader shows during warmup.
+- Push attempt: git push -> 403 "Permission to 5krm/BMW.git denied"; Contents API PUT -> "Resource not accessible by personal access token"; response header `x-accepted-github-permissions: contents=write`; PR-creation API also 403. Token authenticates + reads fine but has NO write scopes.
+
+Stage Summary:
+- Local main (db5f808) = complete, verified, push-ready: studio-v2 showroom + smoke-free car + 3.2MB meshopt model + loading screen + resize-fix.
+- Blocked ONLY on token permissions: needs Contents: Read and write + Pull requests: Read and write (fine-grained tokens keep the same token string when you edit permissions, so no resend needed once updated).
+- Push+PR plan staged: push main -> feature/studio-v2-showroom, force-set main to 72d4be3 base, open PR (the three improvements as diff), merge -> main ends with everything.
