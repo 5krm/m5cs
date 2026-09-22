@@ -16,11 +16,13 @@
  *   0.42–0.72  FRONT → REAR   sweep along flank    rear caption in/out
  *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
  *
- * Backdrop: a procedural 3D showroom — cyclorama wall with a warm horizon
- * glow, stage halo rings, distant light pillars, floor runway lines, a soft
- * light shaft under the central softbox, dark reflective floor (mirrored-car
- * double trick), canvas vignette — no image assets at all. No smoke, no sway,
- * no sprites: the car reads parked and grounded (cast shadow + fake-AO blob).
+ * Backdrop: a procedural 3D showroom — cyclorama wall with panel seams and a
+ * warm horizon glow, overhead softbox strips, stage halo rings + wall glow,
+ * distant light pillars (with floor reflections), floor runway lines + stage
+ * rings, a volumetric light shaft with drifting dust motes, dark reflective
+ * floor (mirrored-car double trick) and a subtle UnrealBloom pass — no image
+ * assets at all. No smoke, no sway: the car reads parked and grounded (real
+ * cast shadow + body AO + per-wheel contact-shadow patches).
  *
  * Loading: the meshopt-compressed GLB (3.2 MB vs 12.7 MB) is fetched with
  * a stream reader so the branded overlay shows the REAL byte %, then
@@ -36,6 +38,10 @@ import type { CSSProperties } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { MeshoptDecoder } from 'meshoptimizer/decoder'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -111,6 +117,39 @@ function makeContactShadowTexture(): THREE.CanvasTexture {
   return tex
 }
 
+/** One wheel's contact patch — darker and tighter than the body blob */
+function makeWheelShadowTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 128
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 64)
+  g.addColorStop(0, 'rgba(0,0,0,0.9)')
+  g.addColorStop(0.4, 'rgba(0,0,0,0.55)')
+  g.addColorStop(0.75, 'rgba(0,0,0,0.18)')
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 128, 128)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Tiny soft sprite for the air-dust motes drifting in the light shaft */
+function makeDustSpriteTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 32
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+  g.addColorStop(0, 'rgba(255,255,255,1)')
+  g.addColorStop(0.4, 'rgba(255,255,255,0.5)')
+  g.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 32, 32)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 /** Dark seamless studio vignette used as scene.background */
 function makeStudioBackdropTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
@@ -154,13 +193,22 @@ function makeCycloramaTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!
   const g = ctx.createLinearGradient(0, 0, 0, 512)
   g.addColorStop(0, '#050608') // ≡ fog color — seamless dissolve at the top
-  g.addColorStop(0.55, '#0a0c11')
-  g.addColorStop(0.8, '#12141b')
-  g.addColorStop(0.9, '#1e1a15') // warm lift begins
-  g.addColorStop(0.955, '#342a1a') // glow band peak (just above the floor)
-  g.addColorStop(1, '#0b0c10') // dark base at the floor seam
+  g.addColorStop(0.5, '#0b0d12')
+  g.addColorStop(0.78, '#151823')
+  g.addColorStop(0.9, '#241e13') // warm lift begins
+  g.addColorStop(0.955, '#3f331c') // glow band peak (just above the floor)
+  g.addColorStop(1, '#0c0d11') // dark base at the floor seam
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 1024, 512)
+  // faint vertical wall-panel seams — reads as a real studio cove
+  ctx.strokeStyle = 'rgba(255,255,255,0.028)'
+  ctx.lineWidth = 2
+  for (let x = 42; x < 1024; x += 86) {
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, 512)
+    ctx.stroke()
+  }
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -401,14 +449,17 @@ export default function ScrollExperience() {
     /* ── Camera ────────────────────────────────────────────────────── */
     const camera = new THREE.PerspectiveCamera(FOV_DESKTOP, window.innerWidth / window.innerHeight, 0.1, 160)
 
+    let updateDust: ((t: number) => void) | null = null
+
     /* ── Lights — three-point studio rig ───────────────────────────── */
-    const key = new THREE.SpotLight(0xfff1dd, 380) // warm keylight — casts the contact shadow
-    key.position.set(7, 9, 5)
+    const key = new THREE.SpotLight(0xfff1dd, 420) // warm keylight — casts the contact shadow
+    key.position.set(5.5, 10.5, 3.5) // steep, near-overhead → shadow hugs the body
     key.angle = 0.55
     key.penumbra = 0.55
     key.decay = 2
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
+    key.shadow.radius = 4 // PCF penumbra softening
     key.shadow.bias = -0.0002
     key.shadow.normalBias = 0.02
     key.shadow.camera.near = 3
@@ -428,14 +479,14 @@ export default function ScrollExperience() {
      * and fade into the fog with distance. Desktop only — on portrait
      * phones the wider FOV catches them as odd slashes across the sky. */
     if (window.innerWidth >= 768) {
-      const stripMat = new THREE.MeshBasicMaterial({ color: 0xd8dee9, side: THREE.DoubleSide })
+      const stripMat = new THREE.MeshBasicMaterial({ color: 0xb7c0cf, side: THREE.DoubleSide })
       for (const [sx, sz, sw] of [
         [0, -3.4, 13],
         [0, 0, 15],
         [0, 3.4, 13],
       ] as const) {
-        const strip = new THREE.Mesh(new THREE.PlaneGeometry(sw, 0.72), stripMat)
-        strip.position.set(sx, 5.35, sz)
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(sw, 0.55), stripMat)
+        strip.position.set(sx, 4.25, sz) // low enough to sit IN the wide-shot frames
         strip.rotation.x = Math.PI / 2 // face down toward the car
         scene.add(strip)
       }
@@ -466,6 +517,22 @@ export default function ScrollExperience() {
       pillar.position.set(px, ph / 2, pz)
       scene.add(pillar)
     }
+    // Opaque mirror clones just below y = 0 — show through the semi-
+    // transparent slab as faint reflections (same trick as the car double).
+    if (window.innerWidth >= 768) {
+      const mirrorPillarMat = new THREE.MeshBasicMaterial({ color: 0x272d3a })
+      for (const [px, pz, ph] of [
+        [-14, -11, 7.5],
+        [-20, -4, 8],
+        [-9, -18, 6.5],
+        [16.5, -13, 4.5],
+        [29, -7, 4.5],
+      ] as const) {
+        const mirrorPillar = new THREE.Mesh(new THREE.BoxGeometry(0.09, ph, 0.09), mirrorPillarMat)
+        mirrorPillar.position.set(px, -ph / 2, pz)
+        scene.add(mirrorPillar)
+      }
+    }
 
     /* ── Floor runway lines — design language for the bare slab ────── */
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.26, depthWrite: false })
@@ -485,13 +552,32 @@ export default function ScrollExperience() {
       }
     }
 
+    /* ── Stage floor rings — quiet circular design around the car ──── */
+    const stageRingA = new THREE.Mesh(
+      new THREE.RingGeometry(6.85, 6.92, 128),
+      new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.1, depthWrite: false }),
+    )
+    stageRingA.rotation.x = -Math.PI / 2
+    stageRingA.position.y = 0.009
+    stageRingA.renderOrder = 1
+    scene.add(stageRingA)
+
+    const stageRingB = new THREE.Mesh(
+      new THREE.RingGeometry(9.55, 9.6, 128),
+      new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.055, depthWrite: false }),
+    )
+    stageRingB.rotation.x = -Math.PI / 2
+    stageRingB.position.y = 0.009
+    stageRingB.renderOrder = 1
+    scene.add(stageRingB)
+
     /* ── Stage halo rings + light shaft (desktop wide shots only) ────
      * A pair of emissive rings hanging in the -x/-z quadrant: the hero
      * camera looks straight through the car at them, and the front
      * close-up catches them behind the nose — the launch-stage look.
      * Portrait FOV catches them as clutter, so they stay desktop-only. */
     if (window.innerWidth >= 768) {
-      const ringMatA = new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.5 })
+      const ringMatA = new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.8 })
       const ringA = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.055, 12, 140), ringMatA)
       ringA.position.set(-13, 3.2, -13)
       ringA.lookAt(0, 1.8, 0) // face the car → reads as a halo from the hero cam
@@ -499,7 +585,7 @@ export default function ScrollExperience() {
 
       const ringB = new THREE.Mesh(
         new THREE.TorusGeometry(7.6, 0.04, 12, 140),
-        new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.2 }),
+        new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.28 }),
       )
       ringB.position.set(-17, 4.2, -17)
       ringB.lookAt(0, 1.8, 0)
@@ -509,20 +595,64 @@ export default function ScrollExperience() {
        * that dissolves before the floor. Both close-up cameras sit just
        * outside its footprint (r = 3.8), so it never washes the lens. */
       const shaft = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 3.8, 5.3, 48, 1, true),
+        new THREE.CylinderGeometry(0.55, 2.8, 3.9, 48, 1, true),
         new THREE.MeshBasicMaterial({
           map: makeLightShaftTexture(),
           transparent: true,
-          opacity: 0.09,
+          opacity: 0.045,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           side: THREE.DoubleSide,
           fog: false,
         }),
       )
-      shaft.position.set(0, 2.68, 0) // top kisses the central strip at y = 5.33
+      shaft.position.set(0, 2.25, 0) // top kisses the softbox strips at y = 4.2
       shaft.renderOrder = 2
       scene.add(shaft)
+
+      /* Drifting dust motes inside the light shaft — makes the air itself
+       * feel dense and expensive. Very subtle: ~140 tiny additive specks. */
+      const DUST_COUNT = 140
+      const dustBase = new Float32Array(DUST_COUNT * 3)
+      const dustSeed = new Float32Array(DUST_COUNT * 2) // bob speed, phase
+      for (let i = 0; i < DUST_COUNT; i++) {
+        const r = Math.sqrt(Math.random()) * 2.3
+        const a = Math.random() * Math.PI * 2
+        dustBase[i * 3] = Math.cos(a) * r
+        dustBase[i * 3 + 1] = 0.3 + Math.random() * 3.6
+        dustBase[i * 3 + 2] = Math.sin(a) * r
+        dustSeed[i * 2] = 0.25 + Math.random() * 0.5
+        dustSeed[i * 2 + 1] = Math.random() * Math.PI * 2
+      }
+      const dustGeo = new THREE.BufferGeometry()
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(dustBase.slice(), 3))
+      const dust = new THREE.Points(
+        dustGeo,
+        new THREE.PointsMaterial({
+          map: makeDustSpriteTexture(),
+          size: 0.05,
+          sizeAttenuation: true,
+          color: 0xfff3dd,
+          transparent: true,
+          opacity: 0.32,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+        }),
+      )
+      dust.renderOrder = 3
+      scene.add(dust)
+      if (!prefersReduced) {
+        updateDust = (t) => {
+          const attr = dustGeo.attributes.position
+          const arr = attr.array as Float32Array
+          for (let i = 0; i < DUST_COUNT; i++) {
+            arr[i * 3 + 1] = dustBase[i * 3 + 1] + Math.sin(t * dustSeed[i * 2] + dustSeed[i * 2 + 1]) * 0.4
+          }
+          attr.needsUpdate = true
+          dust.rotation.y = t * 0.04
+        }
+      }
     }
 
     /* ── Floor — dark showroom slab with a reflection window ─────────
@@ -535,9 +665,9 @@ export default function ScrollExperience() {
       new THREE.CircleGeometry(90, 72),
       new THREE.MeshStandardMaterial({
         color: 0x06070b,
-        roughness: 0.32,
+        roughness: 0.34,
         metalness: 0.55,
-        envMapIntensity: 0.4,
+        envMapIntensity: 0.35,
         transparent: true,
         opacity: 0.84,
       }),
@@ -552,7 +682,7 @@ export default function ScrollExperience() {
       new THREE.MeshBasicMaterial({
         map: poolTex,
         transparent: true,
-        opacity: 0.09,
+        opacity: 0.1,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -561,20 +691,40 @@ export default function ScrollExperience() {
     pool.position.y = 0.01
     scene.add(pool)
 
+    // Wide warm glow on the back wall behind the halo rings — gives the
+    // upper frame a luminous depth layer from every wide camera.
+    if (window.innerWidth >= 768) {
+      const wallGlow = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: poolTex,
+          color: 0xffe9c8,
+          transparent: true,
+          opacity: 0.05,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+        }),
+      )
+      wallGlow.position.set(-15, 4.2, -15)
+      wallGlow.scale.set(19, 12, 1)
+      scene.add(wallGlow)
+    }
+
     /* ── Car root + fake-AO contact blob (model streams in async) ──── */
     const carGroup = new THREE.Group()
     carGroup.rotation.y = BASE_YAW
     scene.add(carGroup)
 
     // Soft dark ellipse under the footprint (yaws with the car) — the
-    // visual anchor that welds the tires to the rooftop asphalt.
+    // body AO layer. The per-wheel contact patches (added with the model)
+    // sit just beneath it and do the crisp "parked on real asphalt" work.
     const contactTex = makeContactShadowTexture()
     const contact = new THREE.Mesh(
-      new THREE.PlaneGeometry(TARGET_LENGTH * 1.16, TARGET_LENGTH * 0.52),
-      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false, opacity: 0.72 }),
+      new THREE.PlaneGeometry(TARGET_LENGTH * 1.22, TARGET_LENGTH * 0.56),
+      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false, opacity: 0.5 }),
     )
     contact.rotation.x = -Math.PI / 2
-    contact.position.y = 0.012 // above the shadow catcher, below the tires
+    contact.position.y = 0.014 // above the wheel patches, below the tires
     contact.renderOrder = 1
     carGroup.add(contact)
 
@@ -637,6 +787,29 @@ export default function ScrollExperience() {
         carRig = buildCarRig(gltf.scene)
         carRig.car.position.y = -0.12
         carGroup.add(carRig.car)
+
+        // Per-wheel contact patches, positioned from the normalized
+        // footprint (≈ M5 CS proportions) so any model stays grounded.
+        const wheelTex = makeWheelShadowTexture()
+        const wheelShadowMat = new THREE.MeshBasicMaterial({
+          map: wheelTex,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0.78,
+        })
+        const carSize = new THREE.Box3().setFromObject(carRig.car).getSize(new THREE.Vector3())
+        for (const [wx, wz] of [
+          [0.3 * carSize.x, 0.43 * carSize.z],
+          [0.3 * carSize.x, -0.43 * carSize.z],
+          [-0.3 * carSize.x, 0.43 * carSize.z],
+          [-0.3 * carSize.x, -0.43 * carSize.z],
+        ] as const) {
+          const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.62), wheelShadowMat)
+          patch.rotation.x = -Math.PI / 2
+          patch.position.set(wx, 0.011, wz)
+          patch.renderOrder = 1
+          carGroup.add(patch)
+        }
 
         // Mirrored double just below y = 0 — shows through the semi-
         // transparent floor as a soft showroom reflection (desktop only;
@@ -758,6 +931,24 @@ export default function ScrollExperience() {
       },
     )
 
+    /* ── Post-processing — subtle UnrealBloom so the emissive studio
+     *    lights (softboxes, halo rings, dust) actually glow. Desktop
+     *    only: phone GPUs skip it and render straight to screen. ─────── */
+    let composer: EffectComposer | null = null
+    let bloomPass: UnrealBloomPass | null = null
+    if (window.innerWidth >= 768) {
+      composer = new EffectComposer(renderer)
+      composer.addPass(new RenderPass(scene, camera))
+      bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        0.18, // strength
+        0.35, // radius
+        0.7, // threshold — only true light sources bloom
+      )
+      composer.addPass(bloomPass)
+      composer.addPass(new OutputPass())
+    }
+
     /* ── Lenis momentum scrolling + a single GSAP ticker for everything ── */
     let lenis: Lenis | null = null
     if (!prefersReduced) {
@@ -768,7 +959,9 @@ export default function ScrollExperience() {
     const tick = (time: number) => {
       lenis?.raf(time * 1000)
       applyCamera()
-      renderer.render(scene, camera)
+      updateDust?.(time)
+      if (composer) composer.render()
+      else renderer.render(scene, camera)
     }
     gsap.ticker.add(tick)
     gsap.ticker.lagSmoothing(0)
@@ -783,6 +976,7 @@ export default function ScrollExperience() {
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h, false)
+      composer?.setSize(w, h)
       window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => ScrollTrigger.refresh(), 150)
     }
@@ -813,6 +1007,8 @@ export default function ScrollExperience() {
       poolTex.dispose()
       envTex.dispose()
       pmrem.dispose()
+      bloomPass?.dispose()
+      composer?.dispose()
       renderer.forceContextLoss()
       renderer.dispose()
     }
