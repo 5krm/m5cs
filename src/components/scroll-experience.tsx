@@ -658,7 +658,6 @@ export default function ScrollExperience() {
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h, false)
-      updatePointScale()
       window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => ScrollTrigger.refresh(), 150)
     }
