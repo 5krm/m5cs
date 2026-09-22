@@ -16,10 +16,11 @@
  *   0.42–0.72  FRONT → REAR   sweep along flank    rear caption in/out
  *   0.84–1.00  REAR → OUTRO   pull back wide       closing card fades in
  *
- * Backdrop: a procedural 3D showroom — dark reflective floor (mirrored-car
- * double trick), overhead softbox light strips, canvas vignette, no image
- * assets at all. No smoke, no sway, no sprites: the car reads parked and
- * grounded (cast shadow + fake-AO blob).
+ * Backdrop: a procedural 3D showroom — cyclorama wall with a warm horizon
+ * glow, stage halo rings, distant light pillars, floor runway lines, a soft
+ * light shaft under the central softbox, dark reflective floor (mirrored-car
+ * double trick), canvas vignette — no image assets at all. No smoke, no sway,
+ * no sprites: the car reads parked and grounded (cast shadow + fake-AO blob).
  *
  * Loading: the meshopt-compressed GLB (3.2 MB vs 12.7 MB) is fetched with
  * a stream reader so the branded overlay shows the REAL byte %, then
@@ -137,6 +138,46 @@ function makeFloorPoolTexture(): THREE.CanvasTexture {
   g.addColorStop(1, 'rgba(255,244,224,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 256, 256)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Cyclorama wall — "infinity cove" gradient with a warm glow band that
+ *  sits on the floor line, so the void above the horizon reads as studio
+ *  depth instead of empty black. Top row matches the fog color exactly so
+ *  the wall dissolves seamlessly into the haze. */
+function makeCycloramaTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1024
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createLinearGradient(0, 0, 0, 512)
+  g.addColorStop(0, '#050608') // ≡ fog color — seamless dissolve at the top
+  g.addColorStop(0.55, '#0a0c11')
+  g.addColorStop(0.8, '#12141b')
+  g.addColorStop(0.9, '#1e1a15') // warm lift begins
+  g.addColorStop(0.955, '#342a1a') // glow band peak (just above the floor)
+  g.addColorStop(1, '#0b0c10') // dark base at the floor seam
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 1024, 512)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** Soft vertical falloff for the fake volumetric light shaft */
+function makeLightShaftTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createLinearGradient(0, 0, 0, 256)
+  g.addColorStop(0, 'rgba(255,243,222,0.9)') // bright at the softbox
+  g.addColorStop(0.55, 'rgba(255,238,214,0.32)')
+  g.addColorStop(1, 'rgba(255,235,210,0)') // dissolves at the floor
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 64, 256)
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -347,7 +388,7 @@ export default function ScrollExperience() {
     const scene = new THREE.Scene()
     const backdropTex = makeStudioBackdropTexture()
     scene.background = backdropTex
-    scene.fog = new THREE.FogExp2(0x050608, 0.04)
+    scene.fog = new THREE.FogExp2(0x050608, 0.018) // thin enough for the cyclorama to read, thick enough to hide the floor rim
 
     // Studio reflections via a self-contained PMREM environment (no HDR
     // download) — this is what puts the softbox highlights in the paint.
@@ -400,6 +441,90 @@ export default function ScrollExperience() {
       }
     }
 
+    /* ── Cyclorama — 360° infinity wall at r = 46 ────────────────────
+     * Replaces the empty black void behind the horizon with a photo-studio
+     * cove: near-black up top, warm glow band landing on the floor line.
+     * The thinner fog lets its gradient read while still hiding the floor
+     * rim (the wall occludes everything beyond r = 46 anyway). */
+    const cyclorama = new THREE.Mesh(
+      new THREE.CylinderGeometry(46, 46, 24, 72, 1, true),
+      new THREE.MeshBasicMaterial({ map: makeCycloramaTexture(), side: THREE.BackSide }),
+    )
+    cyclorama.position.y = 12 // base sits exactly on y = 0
+    scene.add(cyclorama)
+
+    /* ── Distant light pillars — parallax anchors for the flank sweep ─ */
+    const pillarMat = new THREE.MeshBasicMaterial({ color: 0xe8ecf2, transparent: true, opacity: 0.4 })
+    for (const [px, pz, ph] of [
+      [-14, -11, 7.5],
+      [-20, -4, 8],
+      [-9, -18, 6.5],
+      [16.5, -13, 4.5],
+      [29, -7, 4.5],
+    ] as const) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.09, ph, 0.09), pillarMat)
+      pillar.position.set(px, ph / 2, pz)
+      scene.add(pillar)
+    }
+
+    /* ── Floor runway lines — design language for the bare slab ────── */
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.26, depthWrite: false })
+    const tickMat = new THREE.MeshBasicMaterial({ color: 0xffe9c4, transparent: true, opacity: 0.13, depthWrite: false })
+    for (const lz of [-3.6, 3.6]) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(46, 0.07), lineMat)
+      line.rotation.x = -Math.PI / 2
+      line.position.set(0, 0.008, lz)
+      line.renderOrder = 1
+      scene.add(line)
+      for (const tx of [-14, -7, 7, 14]) {
+        const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 1.4), tickMat)
+        tick.rotation.x = -Math.PI / 2
+        tick.position.set(tx, 0.008, lz)
+        tick.renderOrder = 1
+        scene.add(tick)
+      }
+    }
+
+    /* ── Stage halo rings + light shaft (desktop wide shots only) ────
+     * A pair of emissive rings hanging in the -x/-z quadrant: the hero
+     * camera looks straight through the car at them, and the front
+     * close-up catches them behind the nose — the launch-stage look.
+     * Portrait FOV catches them as clutter, so they stay desktop-only. */
+    if (window.innerWidth >= 768) {
+      const ringMatA = new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.5 })
+      const ringA = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.055, 12, 140), ringMatA)
+      ringA.position.set(-13, 3.2, -13)
+      ringA.lookAt(0, 1.8, 0) // face the car → reads as a halo from the hero cam
+      scene.add(ringA)
+
+      const ringB = new THREE.Mesh(
+        new THREE.TorusGeometry(7.6, 0.04, 12, 140),
+        new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.2 }),
+      )
+      ringB.position.set(-17, 4.2, -17)
+      ringB.lookAt(0, 1.8, 0)
+      scene.add(ringB)
+
+      /* Fake volumetric shaft under the central softbox — additive cone
+       * that dissolves before the floor. Both close-up cameras sit just
+       * outside its footprint (r = 3.8), so it never washes the lens. */
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 3.8, 5.3, 48, 1, true),
+        new THREE.MeshBasicMaterial({
+          map: makeLightShaftTexture(),
+          transparent: true,
+          opacity: 0.09,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: false,
+        }),
+      )
+      shaft.position.set(0, 2.68, 0) // top kisses the central strip at y = 5.33
+      shaft.renderOrder = 2
+      scene.add(shaft)
+    }
+
     /* ── Floor — dark showroom slab with a reflection window ─────────
      * The mirrored car double (added with the model, desktop only) sits
      * just below y = 0; this semi-transparent floor blends it back at
@@ -427,7 +552,7 @@ export default function ScrollExperience() {
       new THREE.MeshBasicMaterial({
         map: poolTex,
         transparent: true,
-        opacity: 0.04,
+        opacity: 0.09,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
