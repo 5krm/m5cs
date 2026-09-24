@@ -58,7 +58,6 @@ import {
   COCKPIT_CALLOUTS,
 } from '@/types/configurator'
 import ConfiguratorDock from '@/components/configurator-dock'
-import { v8Audio } from '@/lib/engine-audio'
 import CockpitOverlay from '@/components/cockpit-overlay'
 import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/location-scenes'
 
@@ -1090,8 +1089,6 @@ export default function ScrollExperience() {
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
   const [sceneId, setSceneId] = useState<SceneId>('studio')
   const [cockpitMode, setCockpitMode] = useState(false)
-  const [mMode, setMMode] = useState<MMode>('road')
-  const [rpm, setRpm] = useState(0)
   const [xrayValues, setXrayValues] = useState<number[]>(() => SPEC_STATS.map(() => 0))
 
   const lenisInstanceRef = useRef<Lenis | null>(null)
@@ -1105,7 +1102,6 @@ export default function ScrollExperience() {
   const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
   const setSceneRef = useRef<((id: SceneId) => void) | null>(null)
   const toggleCockpitRef = useRef<((active: boolean, mode: MMode) => void) | null>(null)
-  const setMModeRef = useRef<((mode: MMode) => void) | null>(null)
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
 
   const scrollToSection = useCallback((section: SectionId) => {
@@ -1180,13 +1176,13 @@ export default function ScrollExperience() {
 
   const handleOrbitToggle = useCallback(() => {
     setCockpitMode(false)
-    toggleCockpitRef.current?.(false, mMode)
+    toggleCockpitRef.current?.(false, 'road')
     setOrbitMode((prev) => {
       const next = !prev
       toggleOrbitRef.current?.(next)
       return next
     })
-  }, [mMode])
+  }, [])
 
   const handleSceneChange = useCallback((id: SceneId) => {
     setSceneId(id)
@@ -1200,37 +1196,10 @@ export default function ScrollExperience() {
         setOrbitMode(false)
         toggleOrbitRef.current?.(false)
       }
-      toggleCockpitRef.current?.(next, mMode)
+      toggleCockpitRef.current?.(next, 'road')
       return next
     })
-  }, [mMode])
-
-  const handleMModeChange = useCallback((mode: MMode) => {
-    setMMode(mode)
-    setMModeRef.current?.(mode)
   }, [])
-
-  /* Live tachometer while sitting in the cockpit — polls the synth's
-   * automated oscillator frequency (cheap: one getter per frame). */
-  useEffect(() => {
-    if (!cockpitMode) return
-    let raf = 0
-    let last = -1
-    const loop = () => {
-      const r = Math.round(v8Audio.rpm / 25) * 25
-      if (r !== last) {
-        last = r
-        setRpm(r)
-      }
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    return () => {
-      cancelAnimationFrame(raf)
-      // reset the needle when leaving the seat (runs in cleanup, not the body)
-      requestAnimationFrame(() => setRpm(0))
-    }
-  }, [cockpitMode])
 
   /* Spec counters — driven from the scrubbed X-ray progress at ~30 Hz so the
    * React re-render cost stays trivial while the numbers still feel live. */
@@ -1874,10 +1843,6 @@ export default function ScrollExperience() {
         }
         toggleDoorRef.current = (open: boolean) => {
           carRig?.setDoorOpen(open)
-        }
-        setMModeRef.current = (mode: MMode) => {
-          cockpitState.mode = mode
-          if (cockpitState.active) carRig?.setCockpit(true, mode)
         }
 
         // Measure + detect BEFORE parenting: Box3.setFromObject() works in
@@ -2646,13 +2611,10 @@ export default function ScrollExperience() {
           onToggleCockpit={handleCockpitToggle}
         />
 
-        {/* ── Cockpit HUD — tacho, M-mode buttons, callouts ── */}
+        {/* ── Cockpit HUD — exit + callouts ── */}
         <CockpitOverlay
           active={cockpitMode}
-          mode={mMode}
-          onModeChange={handleMModeChange}
           onExit={handleCockpitToggle}
-          rpm={rpm}
           callouts={COCKPIT_CALLOUTS}
         />
       </div>

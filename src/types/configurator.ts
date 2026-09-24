@@ -230,7 +230,7 @@ export const SPEC_STATS: SpecStat[] = [
 ]
 
 /* ══════════════════════════════════════════════════════════════════════
- * Cockpit mode — driver's-eye view, M modes, anchored callouts
+ * Cockpit mode — driver's-eye view and anchored callouts
  * ══════════════════════════════════════════════════════════════════════ */
 
 export type MMode = 'road' | 'm1' | 'm2'
@@ -255,11 +255,5 @@ export const COCKPIT_CALLOUTS: CockpitCallout[] = [
     label: 'M Carbon Bucket Seats',
     sublabel: '\u221210 kg each · illuminated CS badge · Merino leather',
     localPos: [0.05, 0.98, 0.36],
-  },
-  {
-    id: 'console',
-    label: 'M1 / M2 Setup Buttons',
-    sublabel: 'Two stored setups · Nürburgring-tuned MDM',
-    localPos: [0.34, 0.80, -0.04],
   },
 ]
