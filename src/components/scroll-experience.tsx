@@ -56,6 +56,8 @@ import {
   CALIPER_CONFIGS,
   SPEC_STATS,
   COCKPIT_CALLOUTS,
+  getInitialSceneId,
+  getRandomSceneId,
 } from '@/types/configurator'
 import ConfiguratorDock from '@/components/configurator-dock'
 import { v8Audio } from '@/lib/engine-audio'
@@ -1088,7 +1090,8 @@ export default function ScrollExperience() {
   const [scrollProgress, setScrollProgress] = useState(0)
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
-  const [sceneId, setSceneId] = useState<SceneId>('studio')
+  const [sceneId, setSceneId] = useState<SceneId>(() => getInitialSceneId())
+  const initialSceneRef = useRef<SceneId>(sceneId)
   const [cockpitMode, setCockpitMode] = useState(false)
   const [mMode, setMMode] = useState<MMode>('road')
   const [rpm, setRpm] = useState(0)
@@ -1190,8 +1193,18 @@ export default function ScrollExperience() {
 
   const handleSceneChange = useCallback((id: SceneId) => {
     setSceneId(id)
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('m5cs_active_scene', id)
+      } catch {}
+    }
     setSceneRef.current?.(id)
   }, [])
+
+  const handleRandomScene = useCallback(() => {
+    const next = getRandomSceneId(sceneId)
+    handleSceneChange(next)
+  }, [sceneId, handleSceneChange])
 
   const handleCockpitToggle = useCallback(() => {
     setCockpitMode((prev) => {
@@ -1720,14 +1733,30 @@ export default function ScrollExperience() {
     const applyLighting = (L: LocationLighting, instant = false) => {
       for (const tw of lightTweens) tw.kill()
       lightTweens.length = 0
-      const d = instant ? 0 : 0.9
-      const ease = 'power2.inOut'
       const fog = scene.fog as THREE.FogExp2
       const kc = new THREE.Color(L.key.color)
       const rc = new THREE.Color(L.rim.color)
       const hs = new THREE.Color(L.hemi.sky)
       const hg = new THREE.Color(L.hemi.ground)
       const fc = new THREE.Color(L.fog.color)
+      if (instant) {
+        key.color.copy(kc)
+        key.intensity = L.key.intensity
+        key.position.set(L.key.position[0], L.key.position[1], L.key.position[2])
+        rim.color.copy(rc)
+        rim.intensity = L.rim.intensity
+        rim.position.set(L.rim.position[0], L.rim.position[1], L.rim.position[2])
+        hemi.color.copy(hs)
+        hemi.groundColor.copy(hg)
+        hemi.intensity = L.hemi.intensity
+        fog.color.copy(fc)
+        fog.density = L.fog.density
+        renderer.toneMappingExposure = L.exposure
+        scene.environmentIntensity = L.environmentIntensity
+        return
+      }
+      const d = 0.9
+      const ease = 'power2.inOut'
       lightTweens.push(
         gsap.to(key.color, { r: kc.r, g: kc.g, b: kc.b, duration: d, ease }),
         gsap.to(key, { intensity: L.key.intensity, duration: d, ease }),
@@ -1744,8 +1773,8 @@ export default function ScrollExperience() {
         gsap.to(scene, { environmentIntensity: L.environmentIntensity, duration: d, ease }),
       )
     }
-    const setLocation = (id: SceneId) => {
-      if ((activeLocation?.id ?? 'studio') === id) return
+    const setLocation = (id: SceneId, instant = false) => {
+      if ((activeLocation?.id ?? 'studio') === id && !instant) return
       if (activeLocation) {
         scene.remove(activeLocation.group)
         activeLocation.dispose()
@@ -1764,19 +1793,27 @@ export default function ScrollExperience() {
       if (next) {
         scene.add(next.group)
         scene.background = next.background
-        applyLighting(next.lighting)
+        applyLighting(next.lighting, instant)
         if (mirrorRigRef) mirrorRigRef.visible = next.lighting.floorReflection
       } else {
         scene.background = studioBackdrop
-        applyLighting(STUDIO_LIGHTING)
+        applyLighting(STUDIO_LIGHTING, instant)
         if (mirrorRigRef) mirrorRigRef.visible = true
         applyTheme(currentTheme, currentHighBeams) // restores theme-tinted key/rim
       }
       applyBeams()
       // let the new environment settle in from black
-      gsap.fromTo(canvas, { opacity: 0.15 }, { opacity: 1, duration: 0.7, ease: 'power2.out' })
+      if (!instant) {
+        gsap.fromTo(canvas, { opacity: 0.15 }, { opacity: 1, duration: 0.7, ease: 'power2.out' })
+      }
     }
-    setSceneRef.current = setLocation
+    setSceneRef.current = (id: SceneId) => setLocation(id, false)
+
+    // Apply the initial random location if not the studio baseline
+    const initialLocation = initialSceneRef.current
+    if (initialLocation && initialLocation !== 'studio') {
+      setLocation(initialLocation, true)
+    }
 
     let carRig: CarRig | null = null
 
@@ -2642,6 +2679,7 @@ export default function ScrollExperience() {
           onToggleOrbit={handleOrbitToggle}
           sceneId={sceneId}
           onSceneChange={handleSceneChange}
+          onRandomScene={handleRandomScene}
           cockpitMode={cockpitMode}
           onToggleCockpit={handleCockpitToggle}
         />

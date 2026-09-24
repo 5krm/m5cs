@@ -995,6 +995,1110 @@ function buildAlpine(mobile: boolean): LocationScene {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ * 4. Tokyo Night — Shuto Expressway C1 Loop, wet rain tarmac, neon signs
+ * ══════════════════════════════════════════════════════════════════════ */
+
+function buildTokyo(mobile: boolean): LocationScene {
+  const group = new THREE.Group()
+  const haloTex = makeHaloTexture()
+
+  const sky = makeSkyTexture({
+    stops: [
+      [0, '#030510'],
+      [0.3, '#0b0e24'],
+      [0.44, '#1b1232'],
+      [0.485, '#3b1640'],
+      [0.5, '#56184a'],
+      [0.515, '#201228'],
+      [1, '#06070e'],
+    ],
+    silhouettes: (ctx, w, h, horizon) => {
+      // Shinjuku / Minato skyscrapers with window lights
+      const r = rng(77)
+      ctx.fillStyle = '#0e111d'
+      const numTowers = 36
+      for (let i = 0; i < numTowers; i++) {
+        const tw = 28 + r() * 55
+        const th = 40 + r() * 110
+        const tx = (i / numTowers) * w + (r() - 0.5) * 40
+        ctx.fillRect(tx, horizon - th, tw, th)
+
+        // Random window dots
+        const rows = Math.floor(th / 6)
+        const cols = Math.floor(tw / 6)
+        for (let row = 2; row < rows - 1; row++) {
+          for (let col = 1; col < cols - 1; col++) {
+            if (r() < 0.28) {
+              ctx.fillStyle = r() < 0.6 ? 'rgba(255, 230, 160, 0.75)' : 'rgba(100, 220, 255, 0.75)'
+              ctx.fillRect(tx + col * 6, horizon - th + row * 6, 2.5, 2.5)
+            }
+          }
+        }
+        ctx.fillStyle = '#0e111d'
+      }
+
+      // Tokyo Tower silhouette (distinctive lattice transmission tower)
+      const ttx = w * 0.68
+      const tth = 160
+      ctx.fillStyle = '#220810'
+      ctx.beginPath()
+      ctx.moveTo(ttx - 30, horizon)
+      ctx.lineTo(ttx - 12, horizon - 75)
+      ctx.lineTo(ttx - 4, horizon - 130)
+      ctx.lineTo(ttx, horizon - tth)
+      ctx.lineTo(ttx + 4, horizon - 130)
+      ctx.lineTo(ttx + 12, horizon - 75)
+      ctx.lineTo(ttx + 30, horizon)
+      ctx.closePath()
+      ctx.fill()
+
+      // Tokyo Tower red/orange observation deck & lattice glow
+      ctx.fillStyle = 'rgba(255, 60, 40, 0.85)'
+      ctx.fillRect(ttx - 14, horizon - 78, 28, 6)
+      ctx.fillRect(ttx - 6, horizon - 132, 12, 4)
+      ctx.fillStyle = 'rgba(255, 120, 50, 0.9)'
+      ctx.fillRect(ttx - 1, horizon - tth, 2, 28)
+
+      // Viaduct overpass silhouettes
+      ctx.fillStyle = '#0a0d16'
+      ctx.fillRect(0, horizon - 12, w, 16)
+      for (let x = 0; x < w; x += 140) {
+        ctx.fillRect(x + 20, horizon - 12, 16, 16)
+      }
+    },
+  })
+  group.add(skyDome(sky))
+
+  // Wet asphalt ground
+  const asphaltTex = makeGroundTexture(17, '#131519', '#3b4250', 0.28, true)
+  asphaltTex.repeat.set(36, 36)
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(95, 64),
+    new THREE.MeshStandardMaterial({
+      map: asphaltTex,
+      color: 0x90949c,
+      roughness: 0.28,
+      metalness: 0.35,
+      transparent: true,
+      opacity: 0.92,
+    }),
+  )
+  ground.rotation.x = -Math.PI / 2
+  ground.receiveShadow = true
+  group.add(ground)
+
+  // Expressway markings & signage canvas
+  {
+    const [c, ctx] = makeCanvas(2048, 1024)
+    const u = 2048 / 64
+    const cy = 512
+
+    // Green textured Japanese safety shoulder
+    ctx.fillStyle = '#0d4a2b'
+    ctx.fillRect(0, cy + 3.8 * u, 2048, 1.8 * u)
+
+    // Solid white shoulder boundaries
+    ctx.fillStyle = 'rgba(240,240,245,0.85)'
+    ctx.fillRect(0, cy - 4.6 * u, 2048, 0.2 * u)
+    ctx.fillRect(0, cy + 3.8 * u, 2048, 0.2 * u)
+    ctx.fillRect(0, cy + 5.6 * u, 2048, 0.2 * u)
+
+    // Dashed white lane dividers
+    ctx.fillStyle = 'rgba(240,240,245,0.85)'
+    for (let x = 0; x < 2048; x += 4 * u) {
+      ctx.fillRect(x, cy - 1.8 * u, 2 * u, 0.16 * u)
+      ctx.fillRect(x, cy + 1.0 * u, 2 * u, 0.16 * u)
+    }
+
+    // Japanese "60" circular speed limit mark on tarmac
+    const sx = 1024 + 6 * u
+    const sy = cy - 0.4 * u
+    ctx.strokeStyle = '#dc2626'
+    ctx.lineWidth = 0.35 * u
+    ctx.beginPath()
+    ctx.arc(sx, sy, 1.4 * u, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = `bold ${Math.round(1.5 * u)}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('60', sx, sy)
+
+    // Japanese Kanji highway mark "速度落とせ"
+    ctx.fillStyle = 'rgba(240,240,245,0.75)'
+    ctx.font = `bold ${Math.round(1.2 * u)}px "Hiragino Sans", "Meiryo", sans-serif`
+    ctx.fillText('速度落とせ', 1024 - 14 * u, cy - 0.4 * u)
+
+    // Directional chevron arrows
+    for (const ax of [-6, 16]) {
+      const px = 1024 + ax * u
+      const py = cy + 2.4 * u
+      ctx.beginPath()
+      ctx.moveTo(px, py - 0.7 * u)
+      ctx.lineTo(px + 1.2 * u, py)
+      ctx.lineTo(px + 0.6 * u, py)
+      ctx.lineTo(px + 0.6 * u, py + 0.7 * u)
+      ctx.lineTo(px - 0.6 * u, py + 0.7 * u)
+      ctx.lineTo(px - 0.6 * u, py)
+      ctx.lineTo(px - 1.2 * u, py)
+      ctx.closePath()
+      ctx.fill()
+    }
+
+    // Cat's eye reflectors along lane lines
+    ctx.fillStyle = 'rgba(255,190,60,0.95)'
+    for (let x = 0; x < 2048; x += 2 * u) {
+      ctx.fillRect(x, cy - 1.85 * u, 0.15 * u, 0.25 * u)
+      ctx.fillRect(x, cy + 0.95 * u, 0.15 * u, 0.25 * u)
+    }
+
+    const markTex = srgbTexture(c)
+    const marks = new THREE.Mesh(
+      new THREE.PlaneGeometry(64, 32),
+      new THREE.MeshBasicMaterial({ map: markTex, transparent: true, depthWrite: false }),
+    )
+    marks.rotation.x = -Math.PI / 2
+    marks.position.y = 0.012
+    marks.renderOrder = 1
+    group.add(marks)
+  }
+
+  // Guardrails along both sides
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.35 })
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6, roughness: 0.6 })
+  for (const zSide of [-5.2, 5.8]) {
+    for (let x = -60; x <= 60; x += 3.2) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.14), postMat)
+      post.position.set(x, 0.4, zSide)
+      group.add(post)
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(120, 0.32, 0.08), railMat)
+    beam.position.set(0, 0.62, zSide)
+    group.add(beam)
+  }
+
+  // Translucent sound-barrier wall on the -Z side
+  const barrierMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    metalness: 0.3,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.75,
+  })
+  const soundWall = new THREE.Mesh(new THREE.BoxGeometry(120, 2.8, 0.15), barrierMat)
+  soundWall.position.set(0, 1.4, -6.6)
+  group.add(soundWall)
+
+  // Overhead Cantilever Highway Gantry at x = 16
+  const gantryMat = new THREE.MeshStandardMaterial({ color: 0x1e222d, metalness: 0.8, roughness: 0.4 })
+  const gantryCol1 = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.2, 0.35), gantryMat)
+  gantryCol1.position.set(16, 2.6, -6.4)
+  group.add(gantryCol1)
+  const gantryCol2 = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.2, 0.35), gantryMat)
+  gantryCol2.position.set(16, 2.6, 6.4)
+  group.add(gantryCol2)
+  const gantryBeam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 13.2), gantryMat)
+  gantryBeam.position.set(16, 5.0, 0)
+  group.add(gantryBeam)
+
+  // Japanese Expressway Signboard (illuminated green board)
+  {
+    const [sc, sctx] = makeCanvas(512, 256)
+    sctx.fillStyle = '#015f33'
+    sctx.fillRect(0, 0, 512, 256)
+    sctx.strokeStyle = '#f8fafc'
+    sctx.lineWidth = 6
+    sctx.strokeRect(8, 8, 496, 240)
+
+    // Route shield [C1]
+    sctx.fillStyle = '#1d4ed8'
+    if (typeof sctx.roundRect === 'function') {
+      sctx.beginPath()
+      sctx.roundRect(24, 24, 60, 52, 8)
+      sctx.fill()
+    } else {
+      sctx.fillRect(24, 24, 60, 52)
+    }
+    sctx.fillStyle = '#ffffff'
+    sctx.font = 'bold 30px sans-serif'
+    sctx.textAlign = 'center'
+    sctx.fillText('C1', 54, 60)
+
+    sctx.fillStyle = '#ffffff'
+    sctx.font = 'bold 34px "Hiragino Sans", "Meiryo", sans-serif'
+    sctx.textAlign = 'left'
+    sctx.fillText('都心環状線', 100, 58)
+    sctx.font = 'bold 20px sans-serif'
+    sctx.fillText('Inner Circular Route', 100, 88)
+
+    sctx.strokeStyle = 'rgba(255,255,255,0.4)'
+    sctx.lineWidth = 2
+    sctx.beginPath()
+    sctx.moveTo(24, 110)
+    sctx.lineTo(488, 110)
+    sctx.stroke()
+
+    sctx.font = 'bold 30px "Hiragino Sans", "Meiryo", sans-serif'
+    sctx.fillText('霞が関  Kasumigaseki  1.2 km', 30, 160)
+    sctx.fillText('銀座    Ginza         3.4 km', 30, 212)
+
+    const signTex = srgbTexture(sc)
+    const signBoard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 1.8, 3.6),
+      new THREE.MeshStandardMaterial({
+        map: signTex,
+        emissiveMap: signTex,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.9,
+        roughness: 0.3,
+      }),
+    )
+    signBoard.position.set(16, 4.2, -1.8)
+    group.add(signBoard)
+  }
+
+  // Neon Billboards along the highway (Hot Pink & Electric Cyan)
+  const neonMats: THREE.MeshBasicMaterial[] = []
+
+  // Neon Sign 1: Magenta "高速 ///M CS"
+  {
+    const [nc, nctx] = makeCanvas(512, 160)
+    nctx.fillStyle = '#090a14'
+    nctx.fillRect(0, 0, 512, 160)
+    nctx.strokeStyle = '#ff007f'
+    nctx.lineWidth = 6
+    nctx.strokeRect(6, 6, 500, 148)
+    nctx.fillStyle = '#ff1493'
+    nctx.font = 'bold 44px "Hiragino Sans", "Meiryo", sans-serif'
+    nctx.textAlign = 'center'
+    nctx.fillText('高速 ///M CS', 256, 75)
+    nctx.fillStyle = '#f472b6'
+    nctx.font = 'bold 22px sans-serif'
+    nctx.fillText('TOKYO MIDNIGHT RUN', 256, 120)
+
+    const nTex = srgbTexture(nc)
+    const nMat = new THREE.MeshBasicMaterial({ map: nTex })
+    neonMats.push(nMat)
+    const billboard = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 2.0), nMat)
+    billboard.position.set(-6, 3.8, -7.2)
+    group.add(billboard)
+
+    const h = halo(haloTex, 0xff1493, 7.5, 0.45)
+    h.position.set(-6, 3.8, -7.1)
+    group.add(h)
+  }
+
+  // Neon Sign 2: Electric Cyan "ターボ TURBO"
+  {
+    const [nc, nctx] = makeCanvas(512, 160)
+    nctx.fillStyle = '#070b14'
+    nctx.fillRect(0, 0, 512, 160)
+    nctx.strokeStyle = '#00f0ff'
+    nctx.lineWidth = 6
+    nctx.strokeRect(6, 6, 500, 148)
+    nctx.fillStyle = '#00ffff'
+    nctx.font = 'bold 46px "Hiragino Sans", "Meiryo", sans-serif'
+    nctx.textAlign = 'center'
+    nctx.fillText('TURBO ターボ', 256, 75)
+    nctx.fillStyle = '#67e8f9'
+    nctx.font = 'bold 22px sans-serif'
+    nctx.fillText('V8 TWIN POWER · 627 HP', 256, 120)
+
+    const nTex = srgbTexture(nc)
+    const nMat = new THREE.MeshBasicMaterial({ map: nTex })
+    neonMats.push(nMat)
+    const billboard = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 2.0), nMat)
+    billboard.position.set(6, 3.8, -7.2)
+    group.add(billboard)
+
+    const h = halo(haloTex, 0x00f0ff, 7.5, 0.45)
+    h.position.set(6, 3.8, -7.1)
+    group.add(h)
+  }
+
+  // Curved expressway streetlights
+  const lightPoleMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8, roughness: 0.3 })
+  for (const x of [-22, 0, 22]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 6.5, 8), lightPoleMat)
+    pole.position.set(x, 3.25, -5.6)
+    group.add(pole)
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 1.8), lightPoleMat)
+    arm.position.set(x, 6.4, -4.8)
+    group.add(arm)
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.5), lightPoleMat)
+    head.position.set(x, 6.35, -4.0)
+    group.add(head)
+    const h = halo(haloTex, 0xa5f3fc, 4.0, 0.55)
+    h.position.set(x, 6.2, -4.0)
+    group.add(h)
+  }
+
+  const update = (t: number) => {
+    // Dynamic breathing neon flicker
+    const p1 = 0.85 + Math.sin(t * 3.2) * 0.15
+    const p2 = 0.85 + Math.cos(t * 2.7) * 0.15
+    if (neonMats[0]) neonMats[0].color.setRGB(p1, p1, p1)
+    if (neonMats[1]) neonMats[1].color.setRGB(p2, p2, p2)
+  }
+
+  return {
+    id: 'tokyo',
+    group,
+    background: sky,
+    lighting: {
+      key: { color: 0x8ee2ff, intensity: 320, position: [5, 7, 4] },
+      rim: { color: 0xff2e88, intensity: 2.4, position: [-7, 4.5, -6] },
+      hemi: { sky: 0x1d2645, ground: 0x0f121d, intensity: 0.44 },
+      fog: { color: 0x0a0c16, density: 0.016 },
+      exposure: 1.05,
+      environmentIntensity: 0.85,
+      beamScale: 1.25,
+      floorReflection: true,
+    },
+    update,
+    dispose: () => {
+      disposeGroup(group)
+      sky.dispose()
+      haloTex.dispose()
+    },
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 5. Dubai Desert — Al Qudra Dunes at sunset, golden hour sand & road
+ * ══════════════════════════════════════════════════════════════════════ */
+
+function buildDubai(mobile: boolean): LocationScene {
+  const group = new THREE.Group()
+
+  const sky = makeSkyTexture({
+    stops: [
+      [0, '#1c0f32'],
+      [0.22, '#4c1543'],
+      [0.4, '#a32d30'],
+      [0.47, '#db5720'],
+      [0.495, '#f5912c'],
+      [0.51, '#d8702b'],
+      [1, '#2c1208'],
+    ],
+    sun: { x: 0.28, y: 0.492, r: 0.24, color: 'rgba(255,160,50,0.5)', core: 'rgba(255,240,200,0.95)' },
+    silhouettes: (ctx, w, h, horizon) => {
+      // Rolling sand dunes horizon
+      ctx.fillStyle = '#612111'
+      ctx.beginPath()
+      ctx.moveTo(0, horizon)
+      for (let x = 0; x <= w; x += 32) {
+        ctx.lineTo(x, horizon - 10 - Math.sin(x / 140) * 16 - Math.cos(x / 280) * 12)
+      }
+      ctx.lineTo(w, horizon + 4)
+      ctx.closePath()
+      ctx.fill()
+
+      // Distant Dubai skyline mirage (Burj Khalifa needle + towers)
+      const bx = w * 0.62
+      ctx.fillStyle = '#3a160c'
+      // Burj Khalifa
+      ctx.beginPath()
+      ctx.moveTo(bx - 14, horizon)
+      ctx.lineTo(bx - 6, horizon - 50)
+      ctx.lineTo(bx - 3, horizon - 90)
+      ctx.lineTo(bx, horizon - 130) // spire
+      ctx.lineTo(bx + 3, horizon - 90)
+      ctx.lineTo(bx + 6, horizon - 50)
+      ctx.lineTo(bx + 14, horizon)
+      ctx.closePath()
+      ctx.fill()
+
+      // Surrounding skyline towers
+      const r = rng(55)
+      for (let i = 0; i < 18; i++) {
+        const tw = 12 + r() * 22
+        const th = 25 + r() * 65
+        const tx = bx + (r() - 0.5) * 220
+        ctx.fillRect(tx, horizon - th, tw, th)
+      }
+      ctx.fillRect(0, horizon, w, h - horizon)
+    },
+  })
+  group.add(skyDome(sky))
+
+  // Black desert tarmac
+  const asphaltTex = makeGroundTexture(41, '#1b1c20', '#4a4d55', 0.25, false)
+  asphaltTex.repeat.set(36, 36)
+  const road = new THREE.Mesh(
+    new THREE.CircleGeometry(95, 64),
+    new THREE.MeshStandardMaterial({ map: asphaltTex, color: 0x909090, roughness: 0.72, metalness: 0.08 }),
+  )
+  road.rotation.x = -Math.PI / 2
+  road.receiveShadow = true
+  group.add(road)
+
+  // Desert road markings & windblown sand drifts
+  {
+    const [c, ctx] = makeCanvas(2048, 1024)
+    const u = 2048 / 64
+    const cy = 512
+
+    // Dual continuous yellow center lines
+    ctx.fillStyle = '#f59e0b'
+    ctx.fillRect(0, cy - 0.18 * u, 2048, 0.12 * u)
+    ctx.fillRect(0, cy + 0.06 * u, 2048, 0.12 * u)
+
+    // Solid white shoulder lines
+    ctx.fillStyle = 'rgba(245,245,240,0.85)'
+    ctx.fillRect(0, cy - 4.2 * u, 2048, 0.18 * u)
+    ctx.fillRect(0, cy + 4.2 * u, 2048, 0.18 * u)
+
+    // Sand drift patches blowing onto the asphalt
+    const r = rng(63)
+    ctx.fillStyle = 'rgba(212, 126, 58, 0.75)'
+    for (let i = 0; i < 48; i++) {
+      const sx = r() * 2048
+      const side = r() < 0.5 ? -1 : 1
+      const sy = cy + side * (3.8 + r() * 1.8) * u
+      const rw = (2 + r() * 6) * u
+      const rh = (0.6 + r() * 1.4) * u
+      ctx.beginPath()
+      ctx.ellipse(sx, sy, rw, rh, side * 0.25, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    const markTex = srgbTexture(c)
+    const marks = new THREE.Mesh(
+      new THREE.PlaneGeometry(64, 32),
+      new THREE.MeshBasicMaterial({ map: markTex, transparent: true, depthWrite: false }),
+    )
+    marks.rotation.x = -Math.PI / 2
+    marks.position.y = 0.012
+    marks.renderOrder = 1
+    group.add(marks)
+  }
+
+  // Procedural rolling 3D sand dunes flanking the highway
+  const duneMat = new THREE.MeshStandardMaterial({
+    color: 0xc47032,
+    roughness: 0.95,
+    metalness: 0.05,
+    flatShading: true,
+  })
+
+  // North dunes (driver side: z < -5.5)
+  {
+    const geo = new THREE.PlaneGeometry(160, 48, 36, 18)
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i) // maps to Z in world space
+      const d = Math.abs(y)
+      const h = Math.sin(x * 0.05) * 2.2 + Math.cos(y * 0.08) * 1.8 + Math.pow(d / 48, 1.3) * 6.5
+      pos.setZ(i, Math.max(0, h))
+    }
+    geo.computeVertexNormals()
+    const dunes = new THREE.Mesh(geo, duneMat)
+    dunes.rotation.x = -Math.PI / 2
+    dunes.position.set(0, -0.05, -29.5)
+    dunes.receiveShadow = true
+    group.add(dunes)
+  }
+
+  // South dunes (passenger side: z > 5.5)
+  {
+    const geo = new THREE.PlaneGeometry(160, 48, 36, 18)
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const d = Math.abs(y)
+      const h = Math.sin(x * 0.06 + 1.2) * 2.0 + Math.cos(y * 0.07) * 1.6 + Math.pow(d / 48, 1.3) * 6.0
+      pos.setZ(i, Math.max(0, h))
+    }
+    geo.computeVertexNormals()
+    const dunes = new THREE.Mesh(geo, duneMat)
+    dunes.rotation.x = -Math.PI / 2
+    dunes.position.set(0, -0.05, 29.5)
+    dunes.receiveShadow = true
+    group.add(dunes)
+  }
+
+  // Low-poly Date Palms on dune crests
+  const palmCount = mobile ? 12 : 28
+  const rP = rng(91)
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a2e1b, roughness: 0.9 })
+  const frondMat = new THREE.MeshStandardMaterial({ color: 0x2d4f28, roughness: 0.9, flatShading: true })
+  for (let i = 0; i < palmCount; i++) {
+    const px = (rP() - 0.5) * 140
+    const pz = rP() < 0.5 ? -12 - rP() * 22 : 12 + rP() * 22
+    const py = 0.5 + Math.abs(pz) * 0.12
+
+    const palm = new THREE.Group()
+    palm.position.set(px, py, pz)
+
+    // Curved trunk
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, 4.2, 6), trunkMat)
+    trunk.position.y = 2.1
+    trunk.rotation.z = (rP() - 0.5) * 0.25
+    palm.add(trunk)
+
+    // Palm fronds (fan crown)
+    for (let f = 0; f < 7; f++) {
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.4, 4), frondMat)
+      const ang = (f / 7) * Math.PI * 2
+      frond.position.set(Math.sin(ang) * 0.6, 4.1, Math.cos(ang) * 0.6)
+      frond.rotation.set(Math.sin(ang) * 0.8, ang, Math.cos(ang) * 0.8)
+      palm.add(frond)
+    }
+    group.add(palm)
+  }
+
+  // Roadside marker posts with amber reflectors
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.7 })
+  const amberRefl = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.8 })
+  for (let x = -70; x <= 70; x += 10) {
+    for (const zSide of [-4.8, 4.8]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.9, 6), postMat)
+      post.position.set(x, 0.45, zSide)
+      group.add(post)
+      const refl = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.12, 6), amberRefl)
+      refl.position.set(x, 0.75, zSide)
+      group.add(refl)
+    }
+  }
+
+  // Golden hour desert sun
+  const sunLight = new THREE.DirectionalLight(0xffb35a, 2.8)
+  sunLight.position.set(42, 12, -26)
+  group.add(sunLight)
+
+  return {
+    id: 'dubai',
+    group,
+    background: sky,
+    lighting: {
+      key: { color: 0xff9e42, intensity: 540, position: [14, 4.5, -8] },
+      rim: { color: 0xf43f5e, intensity: 1.9, position: [-9, 4, 7] },
+      hemi: { sky: 0xfb923c, ground: 0x78350f, intensity: 0.62 },
+      fog: { color: 0xa8572b, density: 0.0068 },
+      exposure: 1.0,
+      environmentIntensity: 0.95,
+      beamScale: 0.4,
+      floorReflection: false,
+    },
+    dispose: () => {
+      disposeGroup(group)
+      sky.dispose()
+    },
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 6. Monaco Marina — Port Hercule Grand Prix track & luxury harbor dusk
+ * ══════════════════════════════════════════════════════════════════════ */
+
+function buildMonaco(mobile: boolean): LocationScene {
+  const group = new THREE.Group()
+  const haloTex = makeHaloTexture()
+
+  const sky = makeSkyTexture({
+    stops: [
+      [0, '#07152b'],
+      [0.26, '#133a68'],
+      [0.42, '#215c89'],
+      [0.48, '#bd6a35'],
+      [0.5, '#e58e46'],
+      [0.52, '#22384a'],
+      [1, '#0c1622'],
+    ],
+    silhouettes: (ctx, w, h, horizon) => {
+      // Monte Carlo hillside & Prince's Palace rock
+      ctx.fillStyle = '#112235'
+      ctx.beginPath()
+      ctx.moveTo(0, horizon)
+      ctx.lineTo(w * 0.15, horizon - 80)
+      ctx.lineTo(w * 0.45, horizon - 120)
+      ctx.lineTo(w * 0.8, horizon - 45)
+      ctx.lineTo(w, horizon - 20)
+      ctx.lineTo(w, horizon + 4)
+      ctx.closePath()
+      ctx.fill()
+
+      // Cascading hillside terrace lights
+      const r = rng(33)
+      for (let i = 0; i < 220; i++) {
+        const lx = r() * w
+        const maxH = horizon - 15 - Math.sin((lx / w) * Math.PI) * 90
+        const ly = horizon - 5 - r() * (horizon - maxH)
+        ctx.fillStyle = r() < 0.8 ? 'rgba(254, 215, 170, 0.85)' : 'rgba(147, 197, 253, 0.85)'
+        ctx.fillRect(lx, ly, 2, 2)
+      }
+
+      // Moored luxury yacht masts in the harbor
+      ctx.fillStyle = '#0a1624'
+      for (let x = 80; x < w; x += 110) {
+        const mh = 35 + r() * 45
+        ctx.fillRect(x, horizon - mh, 2.5, mh)
+        ctx.fillRect(x - 8, horizon - mh + 12, 16, 2)
+      }
+      ctx.fillRect(0, horizon, w, h - horizon)
+    },
+  })
+  group.add(skyDome(sky))
+
+  // Grand Prix asphalt
+  const asphaltTex = makeGroundTexture(8, '#1e2126', '#4e5460', 0.32, false)
+  asphaltTex.repeat.set(36, 36)
+  const track = new THREE.Mesh(
+    new THREE.CircleGeometry(95, 64),
+    new THREE.MeshStandardMaterial({
+      map: asphaltTex,
+      color: 0x8a8a8a,
+      roughness: 0.42,
+      metalness: 0.22,
+      transparent: true,
+      opacity: 0.95,
+    }),
+  )
+  track.rotation.x = -Math.PI / 2
+  track.receiveShadow = true
+  group.add(track)
+
+  // Track markings + F1 starting grid + FIA red/white ripple kerb
+  {
+    const [c, ctx] = makeCanvas(2048, 1024)
+    const u = 2048 / 64
+    const cy = 512
+
+    // FIA Grand Prix ripple kerb along the harbour side (z ≈ 4.6)
+    const kerbY = cy + 4.6 * u
+    const blockW = 1.2 * u
+    const kerbH = 0.65 * u
+    for (let x = 0; x < 2048; x += blockW * 2) {
+      ctx.fillStyle = '#dc2626'
+      ctx.fillRect(x, kerbY, blockW, kerbH)
+      ctx.fillStyle = '#f8fafc'
+      ctx.fillRect(x + blockW, kerbY, blockW, kerbH)
+    }
+
+    // Outer white circuit boundary lines
+    ctx.fillStyle = 'rgba(240,240,245,0.9)'
+    ctx.fillRect(0, cy - 4.6 * u, 2048, 0.22 * u)
+    ctx.fillRect(0, cy + 4.5 * u, 2048, 0.22 * u)
+
+    // Formula 1 Starting Grid Slots (Pole position & slot 2)
+    const slots = [
+      { x: 1024 + 4 * u, z: cy - 1.6 * u, num: '1' },
+      { x: 1024 - 8 * u, z: cy + 1.6 * u, num: '2' },
+      { x: 1024 - 20 * u, z: cy - 1.6 * u, num: '3' },
+    ]
+    ctx.strokeStyle = '#f8fafc'
+    ctx.lineWidth = 0.2 * u
+    for (const slot of slots) {
+      // Grid box
+      ctx.strokeRect(slot.x - 2.8 * u, slot.z - 1.4 * u, 5.6 * u, 2.8 * u)
+      // Front chevron marker
+      ctx.fillStyle = '#f59e0b'
+      ctx.beginPath()
+      ctx.moveTo(slot.x + 2.8 * u, slot.z)
+      ctx.lineTo(slot.x + 3.4 * u, slot.z - 0.7 * u)
+      ctx.lineTo(slot.x + 3.4 * u, slot.z + 0.7 * u)
+      ctx.closePath()
+      ctx.fill()
+      // Grid position number
+      ctx.fillStyle = '#f8fafc'
+      ctx.font = `bold ${Math.round(1.1 * u)}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(slot.num, slot.x - 1.8 * u, slot.z)
+    }
+
+    const markTex = srgbTexture(c)
+    const marks = new THREE.Mesh(
+      new THREE.PlaneGeometry(64, 32),
+      new THREE.MeshBasicMaterial({ map: markTex, transparent: true, depthWrite: false }),
+    )
+    marks.rotation.x = -Math.PI / 2
+    marks.position.y = 0.012
+    marks.renderOrder = 1
+    group.add(marks)
+  }
+
+  // Quayside Promenade Balustrade (White stone balusters + brass rail)
+  const balustradeMat = new THREE.MeshStandardMaterial({ color: 0xded8cf, roughness: 0.65 })
+  const railMat = new THREE.MeshStandardMaterial({ color: 0xc89d4c, metalness: 0.85, roughness: 0.25 })
+
+  // Balustrade plinth
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(120, 0.35, 0.45), balustradeMat)
+  plinth.position.set(0, 0.18, 5.8)
+  group.add(plinth)
+
+  // Baluster posts
+  for (let x = -55; x <= 55; x += 1.4) {
+    const baluster = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.7, 8), balustradeMat)
+    baluster.position.set(x, 0.65, 5.8)
+    group.add(baluster)
+  }
+  // Top handrail
+  const handrail = new THREE.Mesh(new THREE.BoxGeometry(120, 0.12, 0.22), railMat)
+  handrail.position.set(0, 1.05, 5.8)
+  group.add(handrail)
+
+  // Mediterranean Sea water plane
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(160, 60),
+    new THREE.MeshStandardMaterial({
+      color: 0x071e33,
+      metalness: 0.85,
+      roughness: 0.15,
+    }),
+  )
+  water.rotation.x = -Math.PI / 2
+  water.position.set(0, -0.06, 36)
+  group.add(water)
+
+  // Moored Superyacht Hull along the quay (z ≈ 10 to 18)
+  const yachtGroup = new THREE.Group()
+  yachtGroup.position.set(4, 0.4, 11)
+
+  const yachtHullMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f6, metalness: 0.2, roughness: 0.25 })
+  const teakMat = new THREE.MeshStandardMaterial({ color: 0x925d34, roughness: 0.7 })
+  const windowMat = new THREE.MeshStandardMaterial({ color: 0x0a1622, metalness: 0.9, roughness: 0.1 })
+
+  // Hull
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(28, 2.4, 4.2), yachtHullMat)
+  hull.position.y = 0.8
+  yachtGroup.add(hull)
+
+  // Teak foredeck
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(27.6, 0.1, 4.0), teakMat)
+  deck.position.y = 2.05
+  yachtGroup.add(deck)
+
+  // Bridge cabin
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(14, 1.6, 3.4), yachtHullMat)
+  cabin.position.set(-2, 2.85, 0)
+  yachtGroup.add(cabin)
+
+  // Cabin panoramic tinted windows
+  const cabinWin = new THREE.Mesh(new THREE.BoxGeometry(13.6, 0.6, 3.5), windowMat)
+  cabinWin.position.set(-2, 3.1, 0)
+  yachtGroup.add(cabinWin)
+
+  // Chrome radar mast with navigation lights
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.9, roughness: 0.2 })
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.6, 8), mastMat)
+  mast.position.set(-1.5, 4.8, 0)
+  yachtGroup.add(mast)
+
+  // Navigation light (green starboard / red port)
+  const navLight = new THREE.PointLight(0x22c55e, 1.5, 8)
+  navLight.position.set(-1.5, 6.0, 0)
+  yachtGroup.add(navLight)
+
+  group.add(yachtGroup)
+
+  // Belle Époque 3-globe Promenade Lampposts
+  const lampPoleMat = new THREE.MeshStandardMaterial({ color: 0x1c2430, metalness: 0.8, roughness: 0.35 })
+  const globeMat = new THREE.MeshBasicMaterial({ color: 0xffedd5 })
+  for (const x of [-28, -6, 16, 38]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 4.6, 8), lampPoleMat)
+    pole.position.set(x, 2.3, 5.4)
+    group.add(pole)
+
+    // Center lantern globe
+    const centerGlobe = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), globeMat)
+    centerGlobe.position.set(x, 4.6, 5.4)
+    group.add(centerGlobe)
+
+    const h = halo(haloTex, 0xffd29d, 4.2, 0.5)
+    h.position.set(x, 4.6, 5.4)
+    group.add(h)
+  }
+
+  // Coastal Italian Cypress & Fan Palms along -Z side (boulevard side)
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3e2c1e, roughness: 0.9 })
+  const cypressMat = new THREE.MeshStandardMaterial({ color: 0x1b3820, roughness: 0.95, flatShading: true })
+  for (let x = -50; x <= 50; x += 8) {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 1.2, 6), trunkMat)
+    trunk.position.set(x, 0.6, -6.8)
+    group.add(trunk)
+    const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.7, 4.8, 6), cypressMat)
+    foliage.position.set(x, 3.4, -6.8)
+    group.add(foliage)
+  }
+
+  const update = (t: number) => {
+    // Gentle yacht anchor light breathing
+    navLight.intensity = 1.2 + Math.sin(t * 2.2) * 0.4
+  }
+
+  return {
+    id: 'monaco',
+    group,
+    background: sky,
+    lighting: {
+      key: { color: 0xffe2b8, intensity: 350, position: [4, 6.5, 4.5] },
+      rim: { color: 0x38bdf8, intensity: 2.1, position: [-7, 5, -6] },
+      hemi: { sky: 0x2563eb, ground: 0x334155, intensity: 0.52 },
+      fog: { color: 0x0f1e2f, density: 0.011 },
+      exposure: 0.98,
+      environmentIntensity: 0.85,
+      beamScale: 0.95,
+      floorReflection: true,
+    },
+    update,
+    dispose: () => {
+      disposeGroup(group)
+      sky.dispose()
+      haloTex.dispose()
+    },
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 7. Cargo Docks — Industrial deepwater container port at midnight
+ * ══════════════════════════════════════════════════════════════════════ */
+
+function buildDocks(mobile: boolean): LocationScene {
+  const group = new THREE.Group()
+  const haloTex = makeHaloTexture()
+
+  const sky = makeSkyTexture({
+    stops: [
+      [0, '#04070e'],
+      [0.3, '#0a1422'],
+      [0.45, '#152538'],
+      [0.49, '#263b4d'],
+      [0.5, '#1c2e3d'],
+      [0.52, '#0c141d'],
+      [1, '#05070c'],
+    ],
+    silhouettes: (ctx, w, h, horizon) => {
+      // Ship-to-shore (STS) container gantry crane silhouettes
+      ctx.fillStyle = '#0f1d2b'
+      for (const cx of [w * 0.25, w * 0.72]) {
+        // A-frame legs
+        ctx.beginPath()
+        ctx.moveTo(cx - 35, horizon)
+        ctx.lineTo(cx - 15, horizon - 120)
+        ctx.lineTo(cx + 15, horizon - 120)
+        ctx.lineTo(cx + 35, horizon)
+        ctx.closePath()
+        ctx.fill()
+
+        // Horizontal boom arm reaching over ship
+        ctx.fillRect(cx - 60, horizon - 110, 150, 10)
+        // Upper tower
+        ctx.fillRect(cx - 10, horizon - 155, 20, 45)
+
+        // Red aircraft warning light on peak
+        ctx.fillStyle = '#ef4444'
+        ctx.fillRect(cx - 2, horizon - 158, 4, 4)
+        ctx.fillStyle = '#0f1d2b'
+      }
+
+      // Warehouse and refinery silhouettes
+      const r = rng(42)
+      for (let i = 0; i < 22; i++) {
+        const tw = 25 + r() * 45
+        const th = 20 + r() * 55
+        const tx = (i / 22) * w
+        ctx.fillRect(tx, horizon - th, tw, th)
+      }
+      ctx.fillRect(0, horizon, w, h - horizon)
+    },
+  })
+  group.add(skyDome(sky))
+
+  // Rain-slicked industrial concrete dock floor
+  const concreteTex = makeGroundTexture(65, '#22272f', '#586270', 0.35, true)
+  concreteTex.repeat.set(32, 32)
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(95, 64),
+    new THREE.MeshStandardMaterial({
+      map: concreteTex,
+      color: 0x888e98,
+      roughness: 0.25,
+      metalness: 0.4,
+      transparent: true,
+      opacity: 0.94,
+    }),
+  )
+  ground.rotation.x = -Math.PI / 2
+  ground.receiveShadow = true
+  group.add(ground)
+
+  // Floor markings (hazard stripes, container bay boxes, stencils)
+  {
+    const [c, ctx] = makeCanvas(2048, 1024)
+    const u = 2048 / 64
+    const cy = 512
+
+    // Concrete expansion joints
+    ctx.strokeStyle = 'rgba(10, 12, 16, 0.7)'
+    ctx.lineWidth = 4
+    for (let x = 0; x < 2048; x += 4 * u) {
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, 1024)
+      ctx.stroke()
+    }
+    for (let y = 0; y < 1024; y += 4 * u) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(2048, y)
+      ctx.stroke()
+    }
+
+    // Diagonal black & yellow safety hazard stripes along container lanes
+    const drawHazardStripe = (startY: number) => {
+      const stripeH = 0.5 * u
+      ctx.fillStyle = '#090a0f'
+      ctx.fillRect(0, startY, 2048, stripeH)
+      ctx.fillStyle = '#eab308'
+      for (let x = -50; x < 2100; x += 0.8 * u) {
+        ctx.beginPath()
+        ctx.moveTo(x, startY + stripeH)
+        ctx.lineTo(x + 0.4 * u, startY + stripeH)
+        ctx.lineTo(x + 0.8 * u, startY)
+        ctx.lineTo(x + 0.4 * u, startY)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+    drawHazardStripe(cy - 5.0 * u)
+    drawHazardStripe(cy + 4.8 * u)
+
+    // Stenciled container bay text
+    ctx.fillStyle = 'rgba(240, 240, 245, 0.8)'
+    ctx.font = `bold ${Math.round(1.0 * u)}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.fillText('BAY 04 — LOAD ONLY', 1024, cy - 3.2 * u)
+    ctx.fillText('BMW M PERFORMANCE LOGISTICS', 1024, cy + 3.2 * u)
+
+    const markTex = srgbTexture(c)
+    const marks = new THREE.Mesh(
+      new THREE.PlaneGeometry(64, 32),
+      new THREE.MeshBasicMaterial({ map: markTex, transparent: true, depthWrite: false }),
+    )
+    marks.rotation.x = -Math.PI / 2
+    marks.position.y = 0.012
+    marks.renderOrder = 1
+    group.add(marks)
+  }
+
+  // Stacked Shipping Containers (20ft & 40ft ISO containers)
+  const containerColors = [0x1d3557, 0xe76f51, 0x2a9d8f, 0x2b2d42]
+  const createContainer = (x: number, y: number, z: number, len: number, colorHex: number, rotY = 0) => {
+    const cGroup = new THREE.Group()
+    cGroup.position.set(x, y, z)
+    cGroup.rotation.y = rotY
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      metalness: 0.6,
+      roughness: 0.45,
+    })
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x18181b,
+      metalness: 0.7,
+      roughness: 0.35,
+    })
+
+    // Main body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(len, 2.5, 2.4), mat)
+    body.position.y = 1.25
+    cGroup.add(body)
+
+    // Corner castings / corner steel pillars
+    for (const sx of [-len / 2, len / 2]) {
+      for (const sz of [-1.2, 1.2]) {
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.55, 0.18), frameMat)
+        pillar.position.set(sx, 1.25, sz)
+        cGroup.add(pillar)
+      }
+    }
+    return cGroup
+  }
+
+  // Stack containers on driver side (z < -7)
+  group.add(createContainer(-6, 0, -8.2, 12, containerColors[0])) // 40ft Navy
+  group.add(createContainer(-6, 2.55, -8.2, 12, containerColors[1])) // 40ft Orange stacked
+  group.add(createContainer(8, 0, -8.2, 8, containerColors[2])) // 20ft Teal
+  group.add(createContainer(8, 2.55, -8.2, 8, containerColors[3])) // 20ft Charcoal stacked
+
+  // Stack containers on passenger side (z > 7.5)
+  group.add(createContainer(-4, 0, 8.4, 12, containerColors[1]))
+  group.add(createContainer(-4, 2.55, 8.4, 12, containerColors[0]))
+  group.add(createContainer(9, 0, 8.4, 8, containerColors[3]))
+
+  // High industrial floodlight tower at x = 16, z = -6.8
+  const towerMat = new THREE.MeshStandardMaterial({ color: 0x27272a, metalness: 0.85, roughness: 0.4 })
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 8.5, 6), towerMat)
+  tower.position.set(16, 4.25, -6.8)
+  group.add(tower)
+
+  // Floodlight crossbar & lamps
+  const crossbar = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 2.4), towerMat)
+  crossbar.position.set(16, 8.4, -6.8)
+  group.add(crossbar)
+
+  for (const fz of [-7.6, -6.8, -6.0]) {
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.3), towerMat)
+    lamp.position.set(15.9, 8.3, fz)
+    group.add(lamp)
+
+    // Intense cool floodlight halo
+    const h = halo(haloTex, 0xdbeafe, 5.2, 0.7)
+    h.position.set(15.7, 8.1, fz)
+    group.add(h)
+  }
+
+  // Rotating emergency hazard beacon on corner container
+  const beaconGroup = new THREE.Group()
+  beaconGroup.position.set(0, 5.2, -8.2)
+  const beaconLight = new THREE.PointLight(0xf59e0b, 2.8, 12)
+  beaconGroup.add(beaconLight)
+  const beaconHalo = halo(haloTex, 0xf59e0b, 3.5, 0.8)
+  beaconGroup.add(beaconHalo)
+  group.add(beaconGroup)
+
+  // Industrial steel bollards on quay edge
+  const bollardMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.7, roughness: 0.35 })
+  for (let x = -40; x <= 40; x += 12) {
+    const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.8, 8), bollardMat)
+    bollard.position.set(x, 0.4, 5.6)
+    group.add(bollard)
+  }
+
+  const update = (t: number) => {
+    // Rotating amber hazard beacon
+    beaconGroup.rotation.y = t * 4.5
+    beaconLight.intensity = 2.0 + Math.sin(t * 9) * 0.8
+  }
+
+  return {
+    id: 'docks',
+    group,
+    background: sky,
+    lighting: {
+      key: { color: 0xd6e8fa, intensity: 380, position: [4, 8, 3] },
+      rim: { color: 0xf59e0b, intensity: 2.5, position: [-8, 6, -5] },
+      hemi: { sky: 0x1b2838, ground: 0x0f1722, intensity: 0.42 },
+      fog: { color: 0x09101a, density: 0.021 },
+      exposure: 0.95,
+      environmentIntensity: 0.75,
+      beamScale: 1.35,
+      floorReflection: true,
+    },
+    update,
+    dispose: () => {
+      disposeGroup(group)
+      sky.dispose()
+      haloTex.dispose()
+    },
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 
 export function buildLocationScene(id: SceneId, opts: { mobile: boolean }): LocationScene | null {
@@ -1005,6 +2109,14 @@ export function buildLocationScene(id: SceneId, opts: { mobile: boolean }): Loca
       return buildGarage(opts.mobile)
     case 'alpine':
       return buildAlpine(opts.mobile)
+    case 'tokyo':
+      return buildTokyo(opts.mobile)
+    case 'dubai':
+      return buildDubai(opts.mobile)
+    case 'monaco':
+      return buildMonaco(opts.mobile)
+    case 'docks':
+      return buildDocks(opts.mobile)
     default:
       return null
   }

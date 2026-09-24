@@ -189,7 +189,7 @@ export const HOTSPOTS: HotspotInfo[] = [
  * Location scenes — the car stays put, the world around it changes
  * ══════════════════════════════════════════════════════════════════════ */
 
-export type SceneId = 'studio' | 'nurburgring' | 'garage' | 'alpine'
+export type SceneId = 'studio' | 'nurburgring' | 'garage' | 'alpine' | 'tokyo' | 'dubai' | 'monaco' | 'docks'
 
 export interface SceneInfo {
   id: SceneId
@@ -204,7 +204,30 @@ export const SCENES: SceneInfo[] = [
   { id: 'nurburgring', name: 'Nürburgring', tagline: 'Pit lane · dusk', swatch: 'linear-gradient(180deg,#1a1d45 0%,#d8703e 60%,#2b2b30 61%)' },
   { id: 'garage', name: 'Munich Garage', tagline: 'Underground · P2', swatch: 'linear-gradient(180deg,#1a1c20,#3a3d44 55%,#6b6d70)' },
   { id: 'alpine', name: 'Alpine Pass', tagline: 'Golden hour · 2,100 m', swatch: 'linear-gradient(180deg,#4f86c6 0%,#f4d6a4 55%,#4e6070 56%,#3f4a2c)' },
+  { id: 'tokyo', name: 'Tokyo Night', tagline: 'Shuto Expressway · Neon rain', swatch: 'linear-gradient(180deg,#0a051b 0%,#e11d48 45%,#06b6d4 75%,#0f172a 100%)' },
+  { id: 'dubai', name: 'Dubai Desert', tagline: 'Al Qudra Dunes · Sunset', swatch: 'linear-gradient(180deg,#831843 0%,#ea580c 45%,#f59e0b 65%,#3b1807 100%)' },
+  { id: 'monaco', name: 'Monaco Marina', tagline: 'Port Hercule · Grand Prix dusk', swatch: 'linear-gradient(180deg,#0e2238 0%,#1e5b88 45%,#e08c38 65%,#1c222b 100%)' },
+  { id: 'docks', name: 'Cargo Docks', tagline: 'Container terminal · Night mist', swatch: 'linear-gradient(180deg,#050b14 0%,#0ea5e9 40%,#f97316 70%,#1e293b 100%)' },
 ]
+
+export function getRandomSceneId(excludeId?: SceneId): SceneId {
+  const pool = excludeId ? SCENES.filter((s) => s.id !== excludeId) : SCENES
+  const list = pool.length > 0 ? pool : SCENES
+  const idx = Math.floor(Math.random() * list.length)
+  return list[idx].id
+}
+
+export function getInitialSceneId(): SceneId {
+  if (typeof window === 'undefined') return 'studio'
+  try {
+    const prev = sessionStorage.getItem('m5cs_active_scene') as SceneId | null
+    const chosen = getRandomSceneId(prev && SCENES.some((s) => s.id === prev) ? prev : undefined)
+    sessionStorage.setItem('m5cs_active_scene', chosen)
+    return chosen
+  } catch {
+    return getRandomSceneId()
+  }
+}
 
 /* ══════════════════════════════════════════════════════════════════════
  * X-Ray technical specification — counted up while the car is scanned

@@ -24,6 +24,7 @@ interface ConfiguratorDockProps {
   onToggleOrbit: () => void
   sceneId: SceneId
   onSceneChange: (id: SceneId) => void
+  onRandomScene?: () => void
   cockpitMode: boolean
   onToggleCockpit: () => void
   showText?: boolean
@@ -45,6 +46,7 @@ export default function ConfiguratorDock({
   onToggleOrbit,
   sceneId,
   onSceneChange,
+  onRandomScene,
   cockpitMode,
   onToggleCockpit,
   showText = true,
@@ -134,11 +136,24 @@ export default function ConfiguratorDock({
 
           {/* Location Scenes Tray */}
           {openTab === 'scene' && (
-            <div className="flex flex-col items-center gap-2.5">
-              <span className="text-[11px] font-medium tracking-wide text-white/90">
-                {SCENES.find((sc) => sc.id === sceneId)?.name} · <span className="text-white/55">{SCENES.find((sc) => sc.id === sceneId)?.tagline}</span>
-              </span>
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col items-center gap-2.5 max-w-full">
+              <div className="flex items-center justify-between w-full px-2 gap-3">
+                <span className="text-[11px] font-medium tracking-wide text-white/90 truncate">
+                  {SCENES.find((sc) => sc.id === sceneId)?.name} · <span className="text-white/55">{SCENES.find((sc) => sc.id === sceneId)?.tagline}</span>
+                </span>
+                {onRandomScene && (
+                  <button
+                    type="button"
+                    onClick={onRandomScene}
+                    title="Switch to a random location"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium bg-white/10 hover:bg-white/20 text-white/90 hover:text-white border border-white/15 transition-all shrink-0 cursor-pointer shadow-sm active:scale-95"
+                  >
+                    <span>🎲</span>
+                    <span>Random Location</span>
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 max-w-[94vw] overflow-x-auto p-1.5 scrollbar-none sm:flex-wrap sm:justify-center">
                 {SCENES.map((sc) => {
                   const isSel = sceneId === sc.id
                   return (
@@ -149,17 +164,19 @@ export default function ConfiguratorDock({
                       title={`${sc.name} — ${sc.tagline}`}
                       aria-label={sc.name}
                       aria-pressed={isSel}
-                      className={`group flex flex-col items-center gap-1.5 rounded-xl border px-2 py-1.5 transition-all cursor-pointer ${
+                      className={`group flex flex-col items-center gap-1.5 rounded-xl border px-2 py-1.5 transition-all cursor-pointer shrink-0 ${
                         isSel
-                          ? 'border-white bg-white/10 scale-105'
+                          ? 'border-white bg-white/15 scale-105 shadow-md shadow-black/40 ring-1 ring-white/50'
                           : 'border-white/10 bg-white/5 opacity-75 hover:opacity-100 hover:border-white/30'
                       }`}
                     >
                       <span
-                        className="block h-9 w-14 rounded-md border border-white/20 shadow-md"
+                        className="block h-9 w-14 rounded-md border border-white/20 shadow-md transition-transform group-hover:scale-105"
                         style={{ background: sc.swatch }}
                       />
-                      <span className={`text-[10px] font-medium ${isSel ? 'text-white' : 'text-white/70'}`}>{sc.name}</span>
+                      <span className={`text-[10px] font-medium whitespace-nowrap ${isSel ? 'text-white font-semibold' : 'text-white/70'}`}>
+                        {sc.name}
+                      </span>
                     </button>
                   )
                 })}
