@@ -542,7 +542,6 @@ type CarRig = {
   setDoorOpen: (open: boolean) => void
   setWheelFinish: (finish: WheelFinish) => void
   setCaliperColor: (color: CaliperColor) => void
-  setCarbonHood: (carbon: boolean) => void
   setPaintColor: (paint: PaintFinish) => void
   /** 0 = normal paint, 1 = full wireframe X-ray (body shell fades to a
    *  translucent blue-print, drivetrain + chassis stay lit) */
@@ -885,14 +884,6 @@ function buildCarRig(
     caliperMat.needsUpdate = true
   }
 
-  let isCarbonHoodExposed = false
-  const setCarbonHood = (carbon: boolean) => {
-    isCarbonHoodExposed = carbon
-    bonnetMeshes.forEach((mesh) => {
-      mesh.material = carbon ? carbonMat : basePaint
-    })
-  }
-
   const setPaintColor = (p: PaintFinish) => {
     const pCfg = PAINT_CONFIGS[p]
     basePaint.color.set(pCfg.hex)
@@ -905,11 +896,9 @@ function buildCarRig(
       m.roughness = pCfg.roughness
       m.clearcoat = pCfg.clearcoat
     })
-    if (!isCarbonHoodExposed) {
-      bonnetMeshes.forEach((mesh) => {
-        mesh.material = basePaint
-      })
-    }
+    bonnetMeshes.forEach((mesh) => {
+      mesh.material = basePaint
+    })
   }
 
   return {
@@ -919,7 +908,6 @@ function buildCarRig(
     setDoorOpen,
     setWheelFinish,
     setCaliperColor,
-    setCarbonHood,
     setPaintColor,
     setXray,
     setCockpit,
@@ -1080,12 +1068,12 @@ export default function ScrollExperience() {
   const [paint, setPaint] = useState<PaintFinish>('brands-hatch-grey')
   const [wheelFinish, setWheelFinish] = useState<WheelFinish>('gold-bronze')
   const [caliperColor, setCaliperColor] = useState<CaliperColor>('red')
-  const [carbonHood, setCarbonHood] = useState(false)
   const [hoodOpen, setHoodOpen] = useState(false)
   const [doorOpen, setDoorOpen] = useState(false)
   const [orbitMode, setOrbitMode] = useState(false)
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
   const [scrollProgress, setScrollProgress] = useState(0)
+  const [showText, setShowText] = useState(true)
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
   const [sceneId, setSceneId] = useState<SceneId>('studio')
@@ -1099,7 +1087,6 @@ export default function ScrollExperience() {
   const updatePaintRef = useRef<((p: PaintFinish) => void) | null>(null)
   const updateWheelRef = useRef<((w: WheelFinish) => void) | null>(null)
   const updateCaliperRef = useRef<((c: CaliperColor) => void) | null>(null)
-  const toggleCarbonHoodRef = useRef<((c: boolean) => void) | null>(null)
   const toggleHoodRef = useRef<((open: boolean) => void) | null>(null)
   const toggleDoorRef = useRef<((open: boolean) => void) | null>(null)
   const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
@@ -1154,12 +1141,8 @@ export default function ScrollExperience() {
     updateCaliperRef.current?.(color)
   }, [])
 
-  const handleToggleCarbonHood = useCallback(() => {
-    setCarbonHood((prev) => {
-      const next = !prev
-      toggleCarbonHoodRef.current?.(next)
-      return next
-    })
+  const handleToggleText = useCallback(() => {
+    setShowText((previous) => !previous)
   }, [])
 
   const handleToggleHood = useCallback(() => {
@@ -1866,9 +1849,6 @@ export default function ScrollExperience() {
         updateCaliperRef.current = (newCaliper: CaliperColor) => {
           carRig?.setCaliperColor(newCaliper)
         }
-        toggleCarbonHoodRef.current = (carbon: boolean) => {
-          carRig?.setCarbonHood(carbon)
-        }
         toggleHoodRef.current = (open: boolean) => {
           carRig?.setHoodOpen(open)
         }
@@ -2368,7 +2348,11 @@ export default function ScrollExperience() {
   /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
 
   return (
-    <main className="relative w-full bg-[#050608] text-[#f2efe7]" data-immersive={orbitMode || cockpitMode ? 'true' : undefined}>
+    <main
+      className="relative w-full bg-[#050608] text-[#f2efe7]"
+      data-immersive={orbitMode || cockpitMode ? 'true' : undefined}
+      data-show-text={showText ? 'true' : 'false'}
+    >
       {/*
         Invisible scroll track — its height (560vh) is the scroll distance
         ScrollTrigger scrubs the camera timeline through. Fully reversible.
@@ -2636,14 +2620,14 @@ export default function ScrollExperience() {
           onToggleHighBeams={toggleHighBeams}
           paint={paint}
           onPaintChange={handlePaintChange}
-          carbonHood={carbonHood}
-          onToggleCarbonHood={handleToggleCarbonHood}
           orbitMode={orbitMode}
           onToggleOrbit={handleOrbitToggle}
           sceneId={sceneId}
           onSceneChange={handleSceneChange}
           cockpitMode={cockpitMode}
           onToggleCockpit={handleCockpitToggle}
+          showText={showText}
+          onToggleText={handleToggleText}
         />
 
         {/* ── Cockpit HUD — tacho, M-mode buttons, callouts ── */}

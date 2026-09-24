@@ -183,10 +183,10 @@ html {
   }
 }
 
-/* Immersive modes (360° orbit / cockpit): the scroll-driven copy layers are
- * animated with inline opacity by GSAP, so a class alone cannot hide them —
- * this wins over the inline style and disables their hit-testing. */
-main[data-immersive='true'] [data-scroll-copy] {
+/* Immersive modes (360° orbit / cockpit) and the copy visibility toggle both
+ * override GSAP's inline animation styles for the scroll-driven copy layers. */
+main[data-immersive='true'] [data-scroll-copy],
+main[data-show-text='false'] [data-scroll-copy] {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;

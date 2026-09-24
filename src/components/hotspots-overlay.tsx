@@ -1,6 +1,5 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
 import {
   HotspotId,
   HOTSPOTS,
@@ -9,7 +8,6 @@ import {
   CaliperColor,
   CALIPER_CONFIGS,
 } from '@/types/configurator'
-import { v8Audio } from '@/lib/engine-audio'
 
 interface HotspotsOverlayProps {
   activeHotspot: HotspotId | null
@@ -22,8 +20,6 @@ interface HotspotsOverlayProps {
   onChangeWheel: (finish: WheelFinish) => void
   caliperColor: CaliperColor
   onChangeCaliper: (color: CaliperColor) => void
-  carbonHood: boolean
-  onToggleCarbonHood: () => void
 }
 
 export default function HotspotsOverlay({
@@ -33,37 +29,7 @@ export default function HotspotsOverlay({
   onChangeWheel,
   caliperColor,
   onChangeCaliper,
-  carbonHood,
-  onToggleCarbonHood,
 }: HotspotsOverlayProps) {
-  const [engineStarted, setEngineStarted] = useState(false)
-  const [isRevving, setIsRevving] = useState(false)
-
-  const handleStartEngine = () => {
-    if (engineStarted) {
-      v8Audio.stop()
-      setEngineStarted(false)
-    } else {
-      v8Audio.start()
-      setEngineStarted(true)
-    }
-  }
-
-  const handleRevEngine = () => {
-    v8Audio.rev()
-    setIsRevving(true)
-    if (!engineStarted) setEngineStarted(true)
-    setTimeout(() => setIsRevving(false), 900)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (v8Audio.running) {
-        v8Audio.stop()
-      }
-    }
-  }, [])
-
   return (
     <>
       {/* ── 3D Anchored Hotspot Pins (Minimalist BMW M micro-dots) ── */}
@@ -160,49 +126,6 @@ export default function HotspotsOverlay({
                 <p className="text-[11px] leading-relaxed text-white/70">
                   4.4-liter BMW M TwinPower Turbo V8 with high-pressure direct injection and cross-bank exhaust manifolds.
                 </p>
-
-                {/* Carbon Hood & Engine Audio controls */}
-                <div className="space-y-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={onToggleCarbonHood}
-                    className={`w-full flex items-center justify-between rounded-xl border px-3 py-2 text-[11px] font-medium transition-all cursor-pointer ${
-                      carbonHood
-                        ? 'border-white bg-white/20 text-white'
-                        : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10'
-                    }`}
-                  >
-                    <span>Exposed Carbon Fiber Hood</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${carbonHood ? 'bg-[#009ADA] text-white' : 'bg-white/10 text-white/60'}`}>
-                      {carbonHood ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleStartEngine}
-                      className={`flex-1 flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-medium transition-all cursor-pointer ${
-                        engineStarted
-                          ? 'border-[#E4002B] bg-[#E4002B]/20 text-[#E4002B]'
-                          : 'border-white/20 bg-white/10 text-white hover:bg-white/20'
-                      }`}
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full ${engineStarted ? 'bg-[#E4002B] animate-ping' : 'bg-white/50'}`} />
-                      <span>{engineStarted ? 'Stop Engine' : 'Start V8'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleRevEngine}
-                      className={`flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 px-3 py-2 text-[11px] font-medium text-white transition-all active:scale-95 cursor-pointer ${
-                        isRevving ? 'ring-1 ring-[#009ADA]' : ''
-                      }`}
-                    >
-                      <span>⚡ Rev V8</span>
-                    </button>
-                  </div>
-                </div>
               </div>
             )}
 

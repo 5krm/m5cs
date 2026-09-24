@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import {
   StudioTheme,
@@ -9,7 +9,6 @@ import {
   PAINT_CONFIGS,
   SCENES,
 } from '@/types/configurator'
-import { v8Audio } from '@/lib/engine-audio'
 
 interface ConfiguratorDockProps {
   theme: StudioTheme
@@ -18,8 +17,6 @@ interface ConfiguratorDockProps {
   onToggleHighBeams: () => void
   paint: PaintFinish
   onPaintChange: (p: PaintFinish) => void
-  carbonHood: boolean
-  onToggleCarbonHood: () => void
   orbitMode: boolean
   onToggleOrbit: () => void
   sceneId: SceneId
@@ -39,8 +36,6 @@ export default function ConfiguratorDock({
   onToggleHighBeams,
   paint,
   onPaintChange,
-  carbonHood,
-  onToggleCarbonHood,
   orbitMode,
   onToggleOrbit,
   sceneId,
@@ -51,37 +46,10 @@ export default function ConfiguratorDock({
   onToggleText,
 }: ConfiguratorDockProps) {
   const [openTab, setOpenTab] = useState<Tab | null>(null)
-  const [engineStarted, setEngineStarted] = useState(false)
-  const [isRevving, setIsRevving] = useState(false)
 
   const toggleTab = (tab: Tab) => {
     setOpenTab((prev) => (prev === tab ? null : tab))
   }
-
-  const handleStartEngine = () => {
-    if (engineStarted) {
-      v8Audio.stop()
-      setEngineStarted(false)
-    } else {
-      v8Audio.start()
-      setEngineStarted(true)
-    }
-  }
-
-  const handleRevEngine = () => {
-    v8Audio.rev()
-    setIsRevving(true)
-    if (!engineStarted) setEngineStarted(true)
-    setTimeout(() => setIsRevving(false), 900)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (v8Audio.running) {
-        v8Audio.stop()
-      }
-    }
-  }, [])
 
   return (
     <div className="pointer-events-auto fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center max-w-[95vw]">
@@ -167,7 +135,7 @@ export default function ConfiguratorDock({
             </div>
           )}
 
-          {/* Studio, Aero & Engine Sound Options Tray */}
+          {/* Studio lighting options tray */}
           {openTab === 'studio' && (
             <div className="flex items-center gap-2 flex-wrap justify-center">
               {/* Studio lighting modes */}
@@ -206,45 +174,6 @@ export default function ConfiguratorDock({
               >
                 <span>Laserlights</span>
                 <span className="text-[9px] uppercase">{highBeams ? 'ON' : 'OFF'}</span>
-              </button>
-
-              {/* Carbon hood toggle */}
-              <button
-                type="button"
-                onClick={onToggleCarbonHood}
-                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
-                  carbonHood
-                    ? 'border-white bg-white/20 text-white'
-                    : 'border-white/10 bg-white/5 text-white/60 hover:text-white'
-                }`}
-              >
-                <span>CFRP Hood</span>
-                <span className="text-[9px] uppercase">{carbonHood ? 'ON' : 'OFF'}</span>
-              </button>
-
-              {/* V8 Engine Start/Stop Audio */}
-              <button
-                type="button"
-                onClick={handleStartEngine}
-                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
-                  engineStarted
-                    ? 'border-[#E4002B] bg-[#E4002B]/20 text-[#E4002B]'
-                    : 'border-white/10 bg-white/5 text-white/60 hover:text-white'
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${engineStarted ? 'bg-[#E4002B] animate-ping' : 'bg-white/50'}`} />
-                <span>{engineStarted ? 'Stop V8' : 'Start V8'}</span>
-              </button>
-
-              {/* V8 Rev Sound */}
-              <button
-                type="button"
-                onClick={handleRevEngine}
-                className={`flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/15 px-2.5 py-1 text-[11px] font-medium text-white transition-all active:scale-95 cursor-pointer ${
-                  isRevving ? 'ring-1 ring-[#009ADA]' : ''
-                }`}
-              >
-                <span>⚡ Rev</span>
               </button>
             </div>
           )}
@@ -289,7 +218,7 @@ export default function ConfiguratorDock({
               ? 'bg-white text-black font-semibold'
               : 'text-white/70 hover:text-white hover:bg-white/10'
           }`}
-          title="Studio Atmosphere & Aero"
+          title="Studio Lighting"
         >
           <span>✦</span>
           <span className="hidden sm:inline">Studio</span>
@@ -360,8 +289,9 @@ export default function ConfiguratorDock({
                 ? 'bg-amber-400/20 text-amber-300 font-semibold border border-amber-400/35'
                 : 'text-white/70 hover:text-white hover:bg-white/10'
             }`}
-            title={showText ? 'Hide on-screen text' : 'Show on-screen text'}
-            aria-label={showText ? 'Hide text' : 'Show text'}
+            title={showText ? 'Hide hero and section text' : 'Show hero and section text'}
+            aria-label="Toggle hero and section text"
+            aria-pressed={showText}
           >
             {showText ? (
               <EyeOff className="h-3 w-3" />
