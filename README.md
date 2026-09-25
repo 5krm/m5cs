@@ -23,8 +23,7 @@ carbon hood, switch studio themes, and start/rev a synthesised twin-turbo V8.
   - [1. Production build (recommended)](#step-4--production-build-recommended)
   - [Environment variables](#environment-variables)
 - [Project structure](#project-structure)
-- [Deploy to Vercel](#deploy-to-vercel)
-- [Troubleshooting](#troubleshooting)
+
 - [Credits & licenses](#credits--licenses)
 
 ---
