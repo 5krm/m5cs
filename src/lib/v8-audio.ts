@@ -42,9 +42,11 @@ class V8AudioEngine {
 
   private initElements() {
     if (typeof window === 'undefined') return
+    // OPTIMIZED FOR SLOWEST INTERNET: preload='none' so audio doesn't auto-download
+    // Only loads on user interaction (startEngine), saves 674KB on initial page load
     if (!this.audioEl) {
       this.audioEl = new Audio('/audio/bmw_m5_cs_v8.mp3')
-      this.audioEl.preload = 'auto'
+      this.audioEl.preload = 'none' // was 'auto' - now lazy
       this.audioEl.volume = 0.85
 
       // When the 23-second initial ignition & showcase ends, transition into continuous idle
@@ -58,14 +60,14 @@ class V8AudioEngine {
 
     if (!this.idleEl) {
       this.idleEl = new Audio('/audio/bmw_m5_idle.mp3')
-      this.idleEl.preload = 'auto'
+      this.idleEl.preload = 'none' // lazy
       this.idleEl.loop = true
       this.idleEl.volume = 0.75
     }
 
     if (!this.revEl) {
       this.revEl = new Audio('/audio/bmw_m5_rev.mp3')
-      this.revEl.preload = 'auto'
+      this.revEl.preload = 'none' // lazy
       this.revEl.volume = 0.95
     }
   }

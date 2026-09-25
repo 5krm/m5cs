@@ -15,23 +15,24 @@ const nextConfig: NextConfig = {
     "localhost",
     "127.0.0.1",
   ],
-  /* config options here */
+  compress: true,
   typescript: {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  experimental: {
+    optimizePackageImports: ['three', 'gsap', 'lenis', 'framer-motion', 'lucide-react'],
+  },
+  productionBrowserSourceMaps: false,
   async headers() {
     return [
       {
+        // HTML - cache 60s with stale-while-revalidate, NOT no-store (kills slow internet)
         source: "/",
         headers: [
           {
             key: "Cache-Control",
-            value: "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
-          },
-          {
-            key: "Clear-Site-Data",
-            value: '"cache"',
+            value: "public, max-age=60, s-maxage=60, stale-while-revalidate=300",
           },
         ],
       },
@@ -40,7 +41,15 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=2592000, immutable",
+            value: "public, max-age=31536000, immutable",
+          },
+          {
+            key: "Accept-Ranges",
+            value: "bytes",
+          },
+          {
+            key: "Cross-Origin-Resource-Policy",
+            value: "cross-origin",
           },
         ],
       },
@@ -49,16 +58,16 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=2592000, immutable",
+            value: "public, max-age=31536000, immutable",
           },
         ],
       },
       {
-        source: "/bmw-logo.svg",
+        source: "/:all*(svg|jpg|jpeg|png|webp|avif|woff2|glb|gltf)",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=2592000, immutable",
+            value: "public, max-age=31536000, immutable",
           },
         ],
       },

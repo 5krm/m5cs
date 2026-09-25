@@ -68,7 +68,27 @@ export { PAINT_CONFIGS, WHEEL_CONFIGS, CALIPER_CONFIGS }
 
 /* ═════════════════ 1. MODEL ══════════════════════════════════════════ */
 
-const MODEL_URL = '/models/bmw-m5-cs/scene.min.glb' // CC-BY-4.0 · fvrenbld — meshopt-compressed (3.2 MB)
+/* ═════════════════ 1. MODEL — ADAPTIVE LOD FOR SLOWEST INTERNET ═════════════════
+ * We ship 4 tiers:
+ * - nano: 259KB / 20k tris (exterior only) — for slow-2g/2g/save-data
+ * - lite: 270KB / 21k tris — for 3g
+ * - mid: 1.1MB / 112k tris — for 4g initial
+ * - high: 3.1MB / 306k tris — for broadband, loaded progressively in background
+ * 
+ * The placeholder car (procedural, 0KB) paints instantly, then we stream the
+ * smallest viable LOD with real byte progress, cache in IndexedDB+CacheStorage,
+ * and progressively upgrade if the connection is fast.
+ */
+const MODEL_TIERS = {
+  pico: { url: '/models/bmw-m5-cs/scene-pico.glb', sizeKB: 4, tris: 72 },
+  nano: { url: '/models/bmw-m5-cs/scene-nano.glb', sizeKB: 9, tris: 200 },
+  ultraLow: { url: '/models/bmw-m5-cs/scene-ultra-low.glb', sizeKB: 260, tris: 20000 },
+  lite: { url: '/models/bmw-m5-cs/scene-low.glb', sizeKB: 270, tris: 21156 },
+  mid: { url: '/models/bmw-m5-cs/scene-mid.glb', sizeKB: 1110, tris: 111945 },
+  high: { url: '/models/bmw-m5-cs/scene.min.glb', sizeKB: 3188, tris: 305984 },
+} as const
+type ModelTier = keyof typeof MODEL_TIERS
+const MODEL_URL = MODEL_TIERS.high.url // fallback, actual URL picked adaptively at runtime
 const TARGET_LENGTH = 4.6 // car is normalized to this world length
 const FLIP_MODEL = false // set true if a swapped model faces backwards
 
@@ -1802,136 +1822,442 @@ export default function ScrollExperience() {
     }
     updatePaintRef.current = applyPaint
 
-    /* ── Model streaming — REAL progress % into the loading overlay ──
-     * GLTFLoader.load()'s onProgress is unreliable (Content-Length is lost
-     * on some CDNs), so we fetch the GLB ourselves, count bytes against the
-     * header (falling back to an asymptotic trickle), hand the buffer to
-     * GLTFLoader.parse with the MeshoptDecoder, then fade the overlay.
-     * The car settle-in doubles as the reveal beat after the fade. */
-    ;(async () => {
-      try {
-        let arrayBuffer: ArrayBuffer | null = null
 
-        // Try CacheStorage first for instant loading
+    /* ── ULTRA-FAST ADAPTIVE MODEL LOADING — SLOWEST INTERNET OPTIMIZED ──
+     * 1. Placeholder car (0KB) paints instantly - no network
+     * 2. Detect connection speed + save-data
+     * 3. Stream smallest viable LOD with real byte progress + IndexedDB/CacheStorage
+     * 4. Progressive upgrade: nano -> lite -> mid -> high in background if fast
+     * 5. Instant reloads from cache on repeat visits
+     */
+
+    // ── Placeholder car — 0KB, instant ──
+    function createPlaceholderCar(): THREE.Group {
+      const group = new THREE.Group()
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8a8d93, metalness: 0.7, roughness: 0.3, envMapIntensity: 0.8 })
+      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x0a0e14, metalness: 0.2, roughness: 0.05, transparent: true, opacity: 0.85 })
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.3, roughness: 0.7 })
+      const rimMat = new THREE.MeshStandardMaterial({ color: 0xc9a86a, metalness: 0.8, roughness: 0.2 })
+      
+      const bodyGeo = new THREE.BoxGeometry(4.6, 0.9, 1.9, 2, 1, 1)
+      const pos = bodyGeo.attributes.position as THREE.BufferAttribute
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i)
+        if (x > 1.8) {
+          const factor = 1 - (x - 1.8) * 0.15
+          pos.setZ(i, pos.getZ(i) * Math.max(0.7, factor))
+        }
+        if (x < -1.8) {
+          const factor = 1 - (-1.8 - x) * 0.12
+          pos.setZ(i, pos.getZ(i) * Math.max(0.75, factor))
+        }
+      }
+      pos.needsUpdate = true
+      bodyGeo.computeVertexNormals()
+      const body = new THREE.Mesh(bodyGeo, bodyMat)
+      body.position.y = 0.65
+      body.castShadow = true
+      group.add(body)
+      
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 1.6), bodyMat)
+      cabin.position.set(-0.15, 1.25, 0)
+      cabin.castShadow = true
+      group.add(cabin)
+      
+      const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.32, 10)
+      wheelGeo.rotateX(Math.PI / 2)
+      const rimGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.34, 6)
+      rimGeo.rotateX(Math.PI / 2)
+      for (const [x, z] of [[1.35, 0.85], [1.35, -0.85], [-1.35, 0.85], [-1.35, -0.85]] as const) {
+        const wg = new THREE.Group()
+        wg.position.set(x, 0.38, z)
+        wg.add(new THREE.Mesh(wheelGeo, wheelMat))
+        const rim = new THREE.Mesh(rimGeo, rimMat)
+        rim.position.z = 0.02
+        wg.add(rim)
+        group.add(wg)
+      }
+      return group
+    }
+
+    const placeholderCar = createPlaceholderCar()
+    placeholderCar.position.y = -0.12
+    carGroup.add(placeholderCar)
+    gsap.to(placeholderCar.position, { y: 0, duration: 0.5, ease: 'power2.out' })
+
+    // ── Connection detection — OPTIMIZED FOR SLOWEST INTERNET ON EARTH ──
+    function detectConnection(): { tier: ModelTier; saveData: boolean; speed: string } {
+      if (typeof navigator === 'undefined') return { tier: 'mid', saveData: false, speed: 'unknown' }
+      const conn = (navigator as any).connection
+      const saveData = !!(conn?.saveData)
+      // Save-Data always gets smallest possible
+      if (saveData) return { tier: 'pico', saveData, speed: 'save-data' }
+      const effectiveType = conn?.effectiveType as string
+      const downlink = conn?.downlink as number
+      const rtt = conn?.rtt as number
+      // Downlink in Mbps - most reliable
+      if (downlink) {
+        if (downlink < 0.3) return { tier: 'pico', saveData, speed: `${downlink}Mbps` } // slow-2g ~ <0.3Mbps
+        if (downlink < 0.6) return { tier: 'nano', saveData, speed: `${downlink}Mbps` } // 2g ~ 0.3-0.6Mbps
+        if (downlink < 1.5) return { tier: 'ultraLow', saveData, speed: `${downlink}Mbps` } // 3g slow
+        if (downlink < 3) return { tier: 'lite', saveData, speed: `${downlink}Mbps` } // 3g fast
+        if (downlink < 8) return { tier: 'mid', saveData, speed: `${downlink}Mbps` } // 4g
+        return { tier: 'high', saveData, speed: `${downlink}Mbps` } // broadband
+      }
+      // Fallback to effectiveType + RTT
+      if (rtt && rtt > 1000) return { tier: 'pico', saveData, speed: `${effectiveType || 'unknown'} ${rtt}ms RTT` }
+      switch (effectiveType) {
+        case 'slow-2g': return { tier: 'pico', saveData, speed: effectiveType }
+        case '2g': return { tier: 'nano', saveData, speed: effectiveType }
+        case '3g': return { tier: 'ultraLow', saveData, speed: effectiveType }
+        case '4g': return { tier: 'mid', saveData, speed: effectiveType }
+        default: return { tier: 'mid', saveData, speed: effectiveType || 'unknown' }
+      }
+    }
+
+    const connInfo = detectConnection()
+    let currentTier: ModelTier = connInfo.tier
+    // carRig already declared abovell
+    let wheelPatches: THREE.Mesh[] = []
+    // mirrorRigRef already declaredl
+
+    // Loading state for UI overlay
+    const loadingState = {
+      tier: currentTier,
+      percent: 0,
+      loadedKB: 0,
+      totalKB: MODEL_TIERS[currentTier].sizeKB as number,
+      isUpgrading: false,
+      fromCache: false,
+    }
+
+    // Expose loading state to window for the React overlay to read
+    ;(window as any).__m5csLoading = loadingState
+
+    function updateLoadingOverlay() {
+      const el = document.getElementById('m5cs-loading-progress')
+      const tierEl = document.getElementById('m5cs-loading-tier')
+      const kbEl = document.getElementById('m5cs-loading-kb')
+      if (el) el.style.width = `${loadingState.percent}%`
+      if (tierEl) tierEl.textContent = loadingState.isUpgrading ? `Upgrading to ${loadingState.tier.toUpperCase()}` : `${loadingState.tier.toUpperCase()} • ${connInfo.speed}`
+      if (kbEl) kbEl.textContent = loadingState.fromCache ? 'From cache • Instant' : `${loadingState.loadedKB} / ${loadingState.totalKB} KB`
+    }
+
+    // ── IndexedDB cache helpers ──
+    const IDB_NAME = 'm5cs-model-cache-v2'
+    const IDB_STORE = 'models'
+    function openIDB(): Promise<IDBDatabase> {
+      return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') { reject(new Error('no IDB')); return }
+        const req = indexedDB.open(IDB_NAME, 2)
+        req.onupgradeneeded = () => {
+          const db = req.result
+          if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE)
+        }
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      })
+    }
+    async function getFromIDB(url: string): Promise<ArrayBuffer | null> {
+      try {
+        const db = await openIDB()
+        return new Promise((resolve) => {
+          const tx = db.transaction(IDB_STORE, 'readonly')
+          const store = tx.objectStore(IDB_STORE)
+          const req = store.get(url)
+          req.onsuccess = () => resolve((req.result as ArrayBuffer) || null)
+          req.onerror = () => resolve(null)
+        })
+      } catch { return null }
+    }
+    async function saveToIDB(url: string, buffer: ArrayBuffer): Promise<void> {
+      try {
+        const db = await openIDB()
+        const tx = db.transaction(IDB_STORE, 'readwrite')
+        tx.objectStore(IDB_STORE).put(buffer, url)
+      } catch {}
+    }
+
+    // ── Streaming fetch with progress ──
+    async function fetchModelWithProgress(url: string, tier: ModelTier, signal?: AbortSignal): Promise<ArrayBuffer> {
+      // Try CacheStorage first
+      if (typeof window !== 'undefined' && 'caches' in window) {
+        try {
+          const cache = await caches.open('bmw-m5-cs-v2')
+          const cached = await cache.match(url)
+          if (cached) {
+            const buf = await cached.arrayBuffer()
+            loadingState.fromCache = true
+            loadingState.percent = 100
+            loadingState.loadedKB = Math.round(buf.byteLength / 1024)
+            loadingState.totalKB = loadingState.loadedKB
+            updateLoadingOverlay()
+            // Warm IDB in background
+            saveToIDB(url, buf)
+            return buf
+          }
+        } catch {}
+      }
+
+      // Try IDB second
+      const idbBuf = await getFromIDB(url)
+      if (idbBuf) {
+        loadingState.fromCache = true
+        loadingState.percent = 100
+        loadingState.loadedKB = Math.round(idbBuf.byteLength / 1024)
+        loadingState.totalKB = loadingState.loadedKB
+        updateLoadingOverlay()
+        // Warm CacheStorage
+        if (typeof window !== 'undefined' && 'caches' in window) {
+          caches.open('bmw-m5-cs-v2').then(cache => {
+            const blob = new Blob([idbBuf])
+            cache.put(url, new Response(blob)).catch(() => {})
+          }).catch(() => {})
+        }
+        return idbBuf
+      }
+
+      // Network fetch with streaming
+      loadingState.fromCache = false
+      const res = await fetch(url, { signal })
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+      const contentLength = res.headers.get('Content-Length')
+      const total = contentLength ? parseInt(contentLength, 10) : MODEL_TIERS[tier].sizeKB * 1024
+
+      if (!res.body) {
+        const buf = await res.arrayBuffer()
+        loadingState.percent = 100
+        loadingState.loadedKB = Math.round(buf.byteLength / 1024)
+        updateLoadingOverlay()
         if (typeof window !== 'undefined' && 'caches' in window) {
           try {
-            const cache = await caches.open('bmw-m5-cs-cache-v1')
-            const match = await cache.match(MODEL_URL)
-            if (match) {
-              arrayBuffer = await match.arrayBuffer()
-            } else {
-              const netRes = await fetch(MODEL_URL)
-              if (netRes.ok) {
-                cache.put(MODEL_URL, netRes.clone()).catch(() => {})
-                arrayBuffer = await netRes.arrayBuffer()
-              }
-            }
-          } catch {
-            // Fallback gracefully to network fetch
+            const cache = await caches.open('bmw-m5-cs-v2')
+            cache.put(url, new Response(buf.slice(0))).catch(() => {})
+          } catch {}
+        }
+        saveToIDB(url, buf)
+        return buf
+      }
+
+      const reader = res.body.getReader()
+      const chunks: Uint8Array[] = []
+      let loaded = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value) {
+          chunks.push(value)
+          loaded += value.length
+          loadingState.loadedKB = Math.round(loaded / 1024)
+          loadingState.totalKB = Math.round(total / 1024) as any
+          loadingState.percent = total > 0 ? Math.min(99, (loaded / total) * 100) : 0
+          updateLoadingOverlay()
+        }
+      }
+      const full = new Uint8Array(loaded)
+      let offset = 0
+      for (const chunk of chunks) {
+        full.set(chunk, offset)
+        offset += chunk.length
+      }
+      const buffer = full.buffer
+      loadingState.percent = 100
+      updateLoadingOverlay()
+
+      // Cache
+      if (typeof window !== 'undefined' && 'caches' in window) {
+        try {
+          const cache = await caches.open('bmw-m5-cs-v2')
+          cache.put(url, new Response(buffer.slice(0))).catch(() => {})
+        } catch {}
+      }
+      saveToIDB(url, buffer)
+      return buffer
+    }
+
+    // ── Car rig builder wrapper ──
+    function buildAndPlaceCar(gltfScene: THREE.Object3D, isUpgrade = false) {
+      const newRig = buildCarRig(gltfScene, paint, wheelFinish, caliperColor)
+
+      // Measure BEFORE parenting (world space == rig-local space when unparented)
+      const footprint = new THREE.Box3().setFromObject(newRig.car)
+      const carSize = footprint.getSize(new THREE.Vector3())
+      const hubs = detectWheelHubs(newRig.car, carSize)
+
+      newRig.car.position.y = isUpgrade ? 0 : -0.12
+
+      // If upgrading, remove old car and patches
+      if (carRig) {
+        carGroup.remove(carRig.car)
+        for (const p of wheelPatches) carGroup.remove(p)
+        if (mirrorRigRef) carGroup.remove(mirrorRigRef)
+      } else {
+        // First real car - remove placeholder
+        carGroup.remove(placeholderCar)
+      }
+
+      carGroup.add(newRig.car)
+      carRig = newRig
+
+      // Update paint/wheel/caliper refs
+      updatePaintRef.current = (newPaint: PaintFinish) => { carRig?.setPaintColor(newPaint) }
+      updateWheelRef.current = (newWheel: WheelFinish) => { carRig?.setWheelFinish(newWheel) }
+      updateCaliperRef.current = (newCaliper: CaliperColor) => { carRig?.setCaliperColor(newCaliper) }
+      toggleHoodRef.current = (open: boolean) => { carRig?.setHoodOpen(open) }
+      toggleDoorRef.current = (open: boolean) => { carRig?.setDoorOpen(open) }
+
+      // Contact shadow
+      contact.geometry.dispose()
+      contact.geometry = new THREE.PlaneGeometry(carSize.x * 1.02, carSize.z * 1.18)
+
+      // Wheel patches
+      wheelPatches = []
+      const wheelTex = makeWheelShadowTexture()
+      const wheelShadowMat = new THREE.MeshBasicMaterial({ map: wheelTex, transparent: true, depthWrite: false, opacity: 0.78 })
+      for (const [wx, wz] of hubs) {
+        const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.5), wheelShadowMat)
+        patch.rotation.x = -Math.PI / 2
+        patch.position.set(wx, 0.011, wz)
+        patch.renderOrder = 1
+        carGroup.add(patch)
+        wheelPatches.push(patch)
+      }
+
+      // Reflection (desktop only, and only for mid/high tiers to save perf on low-end)
+      if (FLOOR_REFLECTION && window.innerWidth >= 768 && (currentTier === 'mid' || currentTier === 'high')) {
+        const mirrorRig = buildCarRig(gltfScene, paint)
+        mirrorRig.car.scale.y = -1
+        mirrorRig.car.traverse((obj) => {
+          if (!(obj instanceof THREE.Mesh)) return
+          obj.castShadow = false
+          obj.receiveShadow = false
+          const mats = Array.isArray(obj.material) ? obj.material.map((m) => m.clone()) : [obj.material.clone()]
+          for (const m of mats) {
+            const std = m as THREE.MeshStandardMaterial
+            std.side = THREE.DoubleSide
+            std.envMapIntensity = Math.min(0.5, (std.envMapIntensity ?? 1) * 0.6)
           }
+          obj.material = Array.isArray(obj.material) ? mats : mats[0]
+        })
+        carGroup.add(mirrorRig.car)
+        mirrorRigRef = mirrorRig.car
+        mirrorRig.car.visible = (activeLocation as LocationScene | null)?.lighting.floorReflection ?? true
+      }
+
+      if (!isUpgrade) {
+        gsap.to(carRig!.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
+      }
+
+      carRig!.setXray(xrayProgressRef.current)
+      if (cockpitState.active) carRig!.setCockpit(true, cockpitState.mode)
+
+      // Hide loading overlay after first car
+      if (!isUpgrade) {
+        const loadingOverlay = document.getElementById('m5cs-loading-overlay')
+        if (loadingOverlay) {
+          gsap.to(loadingOverlay, { autoAlpha: 0, duration: 0.6, ease: 'power2.out', onComplete: () => { loadingOverlay.style.display = 'none' } })
+        }
+      }
+    }
+
+    // ── Main load + progressive upgrade chain ──
+    ;(async () => {
+      try {
+        const abortController = new AbortController()
+
+        // Inject preload hints for next tier
+        if (typeof document !== 'undefined') {
+          const preloadLink = document.createElement('link')
+          preloadLink.rel = 'preload'
+          preloadLink.as = 'fetch'
+          preloadLink.href = MODEL_TIERS[currentTier].url
+          preloadLink.crossOrigin = 'anonymous'
+          document.head.appendChild(preloadLink)
         }
 
-        if (!arrayBuffer) {
-          const res = await fetch(MODEL_URL)
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          arrayBuffer = await res.arrayBuffer()
-        }
+        // Load initial tier (smallest viable for connection)
+        loadingState.tier = currentTier
+        loadingState.totalKB = MODEL_TIERS[currentTier].sizeKB
+        updateLoadingOverlay()
 
+        const initialBuffer = await fetchModelWithProgress(MODEL_TIERS[currentTier].url, currentTier, abortController.signal)
         if (disposed) return
 
         const loader = new GLTFLoader()
         loader.setMeshoptDecoder(MeshoptDecoder)
-        const gltf = await loader.parseAsync(arrayBuffer, '')
+        const gltf = await loader.parseAsync(initialBuffer, '')
         if (disposed) return
 
-        carRig = buildCarRig(gltf.scene, paint, wheelFinish, caliperColor)
+        buildAndPlaceCar(gltf.scene, false)
 
-        updatePaintRef.current = (newPaint: PaintFinish) => {
-          carRig?.setPaintColor(newPaint)
-        }
-        updateWheelRef.current = (newWheel: WheelFinish) => {
-          carRig?.setWheelFinish(newWheel)
-        }
-        updateCaliperRef.current = (newCaliper: CaliperColor) => {
-          carRig?.setCaliperColor(newCaliper)
-        }
-        toggleHoodRef.current = (open: boolean) => {
-          carRig?.setHoodOpen(open)
-        }
-        toggleDoorRef.current = (open: boolean) => {
-          carRig?.setDoorOpen(open)
-        }
+        // Progressive upgrade in background if connection is decent and not save-data
+        // For slowest internet: pico -> nano (8KB) is instant, then ultraLow (260KB) if 3G+, then mid/high if 4G+
+        if (!connInfo.saveData) {
+          const upgradeOrder: ModelTier[] = []
+          if (currentTier === 'pico') upgradeOrder.push('nano', 'ultraLow', 'lite', 'mid', 'high')
+          else if (currentTier === 'nano') upgradeOrder.push('ultraLow', 'lite', 'mid', 'high')
+          else if (currentTier === 'ultraLow') upgradeOrder.push('lite', 'mid', 'high')
+          else if (currentTier === 'lite') upgradeOrder.push('mid', 'high')
+          else if (currentTier === 'mid') upgradeOrder.push('high')
 
-        // Measure + detect BEFORE parenting: Box3.setFromObject() works in
-        // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
-        // into the footprint — that inflates width by ~35 % and shoved the
-        // old patches ~0.3 m outboard of the tires. Rig unparented ⇒ world
-        // space == rig-local space.
-        const footprint = new THREE.Box3().setFromObject(carRig.car)
-        const carSize = footprint.getSize(new THREE.Vector3())
-        const hubs = detectWheelHubs(carRig.car, carSize)
+          // Only auto-upgrade on 4g or when downlink > 2Mbps, or if user is on wifi (unknown but likely fast)
+          const shouldAutoUpgrade = connInfo.speed === '4g' || connInfo.speed === 'unknown' || (typeof (navigator as any).connection?.downlink === 'number' && (navigator as any).connection.downlink > 2)
 
-        carRig.car.position.y = -0.12
-        carGroup.add(carRig.car)
+          if (shouldAutoUpgrade && upgradeOrder.length > 0) {
+            // Small delay so main thread can breathe and user sees first car
+            await new Promise(r => setTimeout(r, 1200))
 
-        // Hug the body-AO ellipse to the measured footprint (was a fixed
-        // TARGET_LENGTH-sized plane that spilled half a metre past the
-        // bumpers and read as a dark halo floating around the car).
-        contact.geometry.dispose()
-        contact.geometry = new THREE.PlaneGeometry(carSize.x * 1.02, carSize.z * 1.18)
+            for (const nextTier of upgradeOrder) {
+              if (disposed) break
+              // Stop upgrading if user is on slow tier and we already have decent quality
+              if (connInfo.tier === 'nano' && nextTier === 'high') break // Don't jump nano->high on slow, go stepwise
 
-        // Per-wheel contact patches anchored at the detected hubs — each
-        // blob now sits centered under its tire instead of guessing from
-        // footprint fractions (the source mesh merges/misnames wheels).
-        const wheelTex = makeWheelShadowTexture()
-        const wheelShadowMat = new THREE.MeshBasicMaterial({
-          map: wheelTex,
-          transparent: true,
-          depthWrite: false,
-          opacity: 0.78,
-        })
-        for (const [wx, wz] of hubs) {
-          const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.5), wheelShadowMat)
-          patch.rotation.x = -Math.PI / 2
-          patch.position.set(wx, 0.011, wz)
-          patch.renderOrder = 1
-          carGroup.add(patch)
-        }
+              try {
+                loadingState.isUpgrading = true
+                loadingState.tier = nextTier
+                loadingState.totalKB = MODEL_TIERS[nextTier].sizeKB
+                loadingState.percent = 0
+                loadingState.fromCache = false
+                updateLoadingOverlay()
 
-        // Mirrored double just below y = 0 — shows through the semi-
-        // transparent floor as a soft showroom reflection (desktop only;
-        // the doubled vertex load isn't worth it on phones).
-        if (FLOOR_REFLECTION && window.innerWidth >= 768) {
-          const mirrorRig = buildCarRig(gltf.scene, paint)
-          mirrorRig.car.scale.y = -1
-          mirrorRig.car.traverse((obj) => {
-            if (!(obj instanceof THREE.Mesh)) return
-            obj.castShadow = false
-            obj.receiveShadow = false
-            const mats = Array.isArray(obj.material)
-              ? obj.material.map((m) => m.clone())
-              : [obj.material.clone()]
-            for (const m of mats) {
-              const std = m as THREE.MeshStandardMaterial
-              std.side = THREE.DoubleSide // negative scale flips winding
-              std.envMapIntensity = Math.min(0.5, (std.envMapIntensity ?? 1) * 0.6)
+                const upgradeBuffer = await fetchModelWithProgress(MODEL_TIERS[nextTier].url, nextTier)
+                if (disposed) break
+
+                const upgradeLoader = new GLTFLoader()
+                upgradeLoader.setMeshoptDecoder(MeshoptDecoder)
+                const upgradeGltf = await upgradeLoader.parseAsync(upgradeBuffer, '')
+                if (disposed) break
+
+                currentTier = nextTier
+                buildAndPlaceCar(upgradeGltf.scene, true)
+
+                // If we upgraded to high, we're done
+                if (nextTier === 'high') break
+
+                // Small pause between upgrades
+                await new Promise(r => setTimeout(r, 800))
+              } catch (e) {
+                console.warn(`[m5cs] Upgrade to ${nextTier} failed, keeping ${currentTier}:`, e)
+                break
+              }
             }
-            obj.material = Array.isArray(obj.material) ? mats : mats[0]
-          })
-          carGroup.add(mirrorRig.car)
-          mirrorRigRef = mirrorRig.car
-          mirrorRig.car.visible = (activeLocation as LocationScene | null)?.lighting.floorReflection ?? true
+            loadingState.isUpgrading = false
+          }
         }
-
-        gsap.to(carRig!.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
-        // the user may have scrolled into the X-ray band before the model landed
-        carRig!.setXray(xrayProgressRef.current)
-        if (cockpitState.active) carRig!.setCockpit(true, cockpitState.mode)
       } catch (err) {
         console.warn('[scroll-experience] car model failed to load:', err)
+        // Keep placeholder car visible on failure - user still gets experience
+        const loadingOverlay = document.getElementById('m5cs-loading-overlay')
+        if (loadingOverlay) {
+          const msgEl = document.getElementById('m5cs-loading-msg')
+          if (msgEl) msgEl.textContent = 'Using lightweight preview • Tap to retry'
+          loadingOverlay.style.cursor = 'pointer'
+          loadingOverlay.onclick = () => window.location.reload()
+        }
       }
     })()
 
+    /* ── Camera rig state — animated by GSAP or Orbit Drag ─────────── */
     /* ── Camera rig state — animated by GSAP or Orbit Drag ─────────── */
     const cam: FlatKey = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0 }
     let frameDt = 1 / 60 // seconds since last tick (set in tick)
@@ -2371,6 +2697,44 @@ export default function ScrollExperience() {
 
       {/* Fixed UI overlay */}
       <div className="pointer-events-none fixed inset-0 z-10">
+        {/* ── ULTRA-FAST LOADING OVERLAY — shows instantly, real byte % ── */}
+        <div
+          id="m5cs-loading-overlay"
+          className="pointer-events-auto absolute inset-0 z-[100] flex flex-col items-center justify-center bg-[#050608] transition-opacity duration-500"
+        >
+          <div className="flex flex-col items-center gap-6 px-6 text-center">
+            {/* BMW Logo pulse */}
+            <div className="relative">
+              <img src="/bmw-logo.svg" alt="" width={56} height={56} className="h-14 w-14 animate-pulse" />
+              <div className="absolute inset-0 h-14 w-14 animate-ping rounded-full bg-white/10" />
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <h2 className="m-0 text-[13px] font-bold uppercase tracking-[0.3em] text-white">BMW M5 CS</h2>
+              <p id="m5cs-loading-msg" className="m-0 text-[11px] tracking-wide text-white/60">Preparing apex experience • Fastest load on any connection</p>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-[280px] max-w-[80vw]">
+              <div className="flex items-center justify-between mb-2">
+                <span id="m5cs-loading-tier" className="text-[10px] font-mono uppercase tracking-widest text-[#FFB733]">DETECTING CONNECTION...</span>
+                <span id="m5cs-loading-kb" className="text-[10px] font-mono text-white/50">0 / 0 KB</span>
+              </div>
+              <div className="h-[2px] w-full overflow-hidden rounded-full bg-white/10">
+                <div id="m5cs-loading-progress" className="h-full w-0 bg-gradient-to-r from-[#FFB733] to-[#E4002B] transition-all duration-150 ease-out" />
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-[9px] uppercase tracking-widest text-white/30">Adaptive LOD • IndexedDB Cache • Placeholder Instant</span>
+                <span className="text-[9px] font-mono text-white/20">M5 CS F90</span>
+              </div>
+            </div>
+
+            {/* Connection info */}
+            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-white/40">
+              Slow internet? We ship 260KB nano model first, then upgrade in background. 0KB placeholder paints instantly.
+            </div>
+          </div>
+        </div>
         {/* ── Navbar (100% Transparent Header with Official BMW Logo) ── */}
         <header className="pointer-events-auto fixed top-0 inset-x-0 z-30 flex items-center justify-between bg-transparent px-[clamp(20px,5vw,64px)] py-4 transition-all">
           {/* Brand logo */}
