@@ -61,7 +61,7 @@ import {
 } from '@/types/configurator'
 import ConfiguratorDock from '@/components/configurator-dock'
 import CockpitOverlay from '@/components/cockpit-overlay'
-import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/location-scenes'
+import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/locations'
 
 export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
 export { PAINT_CONFIGS, WHEEL_CONFIGS, CALIPER_CONFIGS }
@@ -1078,10 +1078,12 @@ export default function ScrollExperience() {
   const [showBookingModal, setShowBookingModal] = useState(false)
   const [bookingConfirmed, setBookingConfirmed] = useState(false)
   const [sceneId, setSceneId] = useState<SceneId>(() => getInitialSceneId())
+  const [sceneFacts, setSceneFacts] = useState<Array<{ label: string; value: string }>>([])
   const initialSceneRef = useRef<SceneId>(sceneId)
   const [cockpitMode, setCockpitMode] = useState(false)
   const [xrayValues, setXrayValues] = useState<number[]>(() => SPEC_STATS.map(() => 0))
 
+  const scrollProgressRef = useRef(0)
   const lenisInstanceRef = useRef<Lenis | null>(null)
   const updateThemeRef = useRef<((t: StudioTheme, hb: boolean) => void) | null>(null)
   const updatePaintRef = useRef<((p: PaintFinish) => void) | null>(null)
@@ -1705,7 +1707,24 @@ export default function ScrollExperience() {
         fog.density = L.fog.density
         renderer.toneMappingExposure = L.exposure
         scene.environmentIntensity = L.environmentIntensity
+        if (L.shadow) {
+          if (L.shadow.angle !== undefined) key.angle = L.shadow.angle
+          if (L.shadow.penumbra !== undefined) key.penumbra = L.shadow.penumbra
+          if (L.shadow.near !== undefined) key.shadow.camera.near = L.shadow.near
+          if (L.shadow.far !== undefined) key.shadow.camera.far = L.shadow.far
+          if (L.shadow.mapSize) key.shadow.mapSize.set(L.shadow.mapSize, L.shadow.mapSize)
+          key.shadow.camera.updateProjectionMatrix()
+        }
         return
+      }
+      if (L.shadow) {
+        // outdoor locations need a wider, longer shadow frustum than the cove
+        if (L.shadow.angle !== undefined) key.angle = L.shadow.angle
+        if (L.shadow.penumbra !== undefined) key.penumbra = L.shadow.penumbra
+        if (L.shadow.near !== undefined) key.shadow.camera.near = L.shadow.near
+        if (L.shadow.far !== undefined) key.shadow.camera.far = L.shadow.far
+        if (L.shadow.mapSize) key.shadow.mapSize.set(L.shadow.mapSize, L.shadow.mapSize)
+        key.shadow.camera.updateProjectionMatrix()
       }
       const d = 0.9
       const ease = 'power2.inOut'
@@ -1725,6 +1744,30 @@ export default function ScrollExperience() {
         gsap.to(scene, { environmentIntensity: L.environmentIntensity, duration: d, ease }),
       )
     }
+    /* Locations ship an equirectangular sky. Baking it into scene.environment
+     * means paint, glass and water reflect the place the car is parked in
+     * instead of the neutral studio probe — the cheapest "this is a real
+     * location" trick in the whole project. */
+    let locationEnv: THREE.WebGLRenderTarget | null = null
+    const applyEnvironment = (next: LocationScene | null) => {
+      if (locationEnv) {
+        // the whole target goes, not just its texture — a bare texture dispose
+        // leaves the render target behind on every location switch
+        locationEnv.dispose()
+        locationEnv = null
+      }
+      if (next?.environment) {
+        try {
+          locationEnv = pmrem.fromEquirectangular(next.environment as THREE.Texture)
+          scene.environment = locationEnv.texture
+        } catch {
+          scene.environment = envTex
+        }
+      } else {
+        scene.environment = envTex
+      }
+    }
+
     const setLocation = (id: SceneId, instant = false) => {
       if ((activeLocation?.id ?? 'studio') === id && !instant) return
       if (activeLocation) {
@@ -1745,14 +1788,17 @@ export default function ScrollExperience() {
       if (next) {
         scene.add(next.group)
         scene.background = next.background
+        applyEnvironment(next)
         applyLighting(next.lighting, instant)
         if (mirrorRigRef) mirrorRigRef.visible = next.lighting.floorReflection
       } else {
         scene.background = studioBackdrop
+        applyEnvironment(null)
         applyLighting(STUDIO_LIGHTING, instant)
         if (mirrorRigRef) mirrorRigRef.visible = true
         applyTheme(currentTheme, currentHighBeams) // restores theme-tinted key/rim
       }
+      setSceneFacts(next?.facts ?? [])
       applyBeams()
       // let the new environment settle in from black
       if (!instant) {
@@ -2158,6 +2204,7 @@ export default function ScrollExperience() {
           onUpdate: (self) => {
             const p = self.progress
             setScrollProgress(p)
+            scrollProgressRef.current = p
             if (p < 0.17) {
               setActiveSection('overview')
             } else if (p < 0.45) {
@@ -2240,7 +2287,12 @@ export default function ScrollExperience() {
       lenis?.raf(time * 1000)
       applyCamera()
       updateDust?.(time)
-      activeLocation?.update?.(time)
+      activeLocation?.update?.({
+        time,
+        dt: frameDt,
+        camera,
+        scroll: scrollProgressRef.current,
+      })
 
       // X-ray: one clock for the wireframe dissolve, the scan sheet and the
       // DOM counters (which read the same ref on their own RAF).
@@ -2336,6 +2388,10 @@ export default function ScrollExperience() {
         scene.remove(activeLocation.group)
         activeLocation.dispose()
         activeLocation = null
+      }
+      if (locationEnv) {
+        locationEnv.dispose()
+        locationEnv = null
       }
       scanTex.dispose()
       studioBackdrop.dispose()
@@ -2627,6 +2683,7 @@ export default function ScrollExperience() {
           sceneId={sceneId}
           onSceneChange={handleSceneChange}
           onRandomScene={handleRandomScene}
+          sceneFacts={sceneFacts}
           cockpitMode={cockpitMode}
           onToggleCockpit={handleCockpitToggle}
           showText={showText}
