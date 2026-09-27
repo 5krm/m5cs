@@ -22,6 +22,8 @@ interface ConfiguratorDockProps {
   sceneId: SceneId
   onSceneChange: (id: SceneId) => void
   onRandomScene?: () => void
+  /** live facts about the active location (surface, air, berth …) */
+  sceneFacts?: Array<{ label: string; value: string }>
   cockpitMode: boolean
   onToggleCockpit: () => void
   showText?: boolean
@@ -42,6 +44,7 @@ export default function ConfiguratorDock({
   sceneId,
   onSceneChange,
   onRandomScene,
+  sceneFacts = [],
   cockpitMode,
   onToggleCockpit,
   showText = true,
@@ -99,6 +102,7 @@ export default function ConfiguratorDock({
                   )
                 })}
               </div>
+
             </div>
           )}
 
@@ -148,7 +152,19 @@ export default function ConfiguratorDock({
                     </button>
                   )
                 })}
+
               </div>
+
+              {sceneFacts.length > 0 && (
+                <div className="mt-2.5 grid grid-cols-3 gap-2 border-t border-white/10 pt-2.5">
+                  {sceneFacts.map((f) => (
+                    <div key={f.label} className="flex flex-col">
+                      <span className="text-[9px] uppercase tracking-wider text-white/45">{f.label}</span>
+                      <span className="text-[11px] font-medium text-white/90">{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
