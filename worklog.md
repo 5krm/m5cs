@@ -272,3 +272,28 @@ Stage Summary:
 - Project now lives at https://gitlab.com/akrmsalah79/m5cs — main == local, branch protection restored.
 - Note: GitLab's auto-generated .gitlab-ci.yml SAST bootstrap commit was replaced by the force-push; re-enable SAST from GitLab UI if wanted.
 - GitHub origin left configured but unused (all 3 tokens lack Contents:write).
+
+---
+Task ID: 20
+Agent: Arena Agent Mode
+Task: User report — "the site doesnt show anything and stuck loading m5 exp... fix it" (page never gets past the "Loading M5 CS Experience" splash, then goes blank).
+
+Work Log:
+- Reproduced headlessly: no browser binary is installable in this sandbox (playwright CDN unreachable), so built a jsdom harness that loads http://localhost:3000 and really executes the Turbopack client chunks (shimmed document.currentScript, ReadableStream/TextDecoder et al., matchMedia, Resize/IntersectionObserver, canvas 2D).
+- Root cause: `new THREE.WebGLRenderer()` THROWS when the browser cannot hand out a WebGL context (hardware acceleration off, blocklisted GPU, software rasterizer disabled, context limit, embedded webviews). That call sits at the top of the ~1150-line init `useEffect` in scroll-experience.tsx with NO try/catch, so the throw escaped the effect → React unmounted the entire root. Harness confirmed the exact symptom: splash visible, then `bodyEls` drops to 0 and the page is blank. app/page.tsx's useSyncExternalStore mount-gate means the last thing painted is the "Loading M5 CS Experience" splash — hence "stuck loading".
+- Fix 1 — probe before mounting: new src/lib/webgl-support.ts `detectWebGL()` (tries webgl2 → webgl → experimental-webgl, releases the probe context via WEBGL_lose_context so it doesn't eat one of the ~16 context slots). Called from a lazy `useState` initialiser (during render, not in an effect — satisfies react-hooks/set-state-in-effect) so the canvas is never mounted on a device that can't drive it.
+- Fix 2 — fail-safe boot: the whole init effect body is now wrapped in try/catch via an IIFE that returns the existing cleanup. The 1150-line body is byte-identical (verified in the diff); only the wrapper is new. A throw now logs + renders the fallback and keeps the React tree alive.
+- Fix 3 — guarded render loop: `tick` is registered through `safeTick`, which unhooks itself from gsap.ticker on the first throw instead of flooding one error per frame forever (covers mid-session WebGL context loss).
+- Fix 4 — graceful UI: branded fallback panel (logo, hero copy, 3 spec stats, the real failure reason, "Try again") instead of a dead page; new ExperienceErrorBoundary around <ScrollExperience> as the last resort; splash now flips to a "Still loading…" + Reload state after 15 s so it can never spin indefinitely.
+- Fix 5 — removed `Clear-Site-Data: "cache"` from the "/" headers in next.config.ts. It wiped the entire origin HTTP cache on EVERY visit, forcing a cold re-download of all JS chunks + the 3.2 MB GLB on every load (and Chrome can abort subresource requests in flight when it processes the header) — a direct contributor to the slow/stuck load. Kept `Cache-Control: no-store` on the document; the immutable content-hashed rules for /models, /audio, /bmw-logo.svg still handle freshness.
+
+Verification:
+- jsdom harness, no-WebGL path: splash → branded fallback "3D showcase unavailable / This browser does not support WebGL.", one clean console.error, tree stays mounted (bodyEls 11 → 33). Previously: blank page.
+- jsdom harness with FAKE_WEBGL=1 (probe passes, three.js then throws internally): caught by the new try/catch → "[scroll-experience] 3D stage failed to initialise" → fallback rendered, no unmount.
+- `npx tsc --noEmit` clean (only the pre-existing examples/websocket socket.io module errors, unrelated).
+- `npx eslint src/` 0 errors.
+- `npm run build` compiles successfully; postbuild standalone copy OK. Dev server serves / 200, GLB 200 (3,188,780 bytes), logo 200. Response headers confirmed free of Clear-Site-Data.
+- Note: real GPU rendering could not be exercised here (no browser/WebGL in the sandbox). The happy path is unchanged by construction — the effect body was only wrapped, not edited.
+
+Stage Summary:
+- A missing WebGL context no longer takes the whole page down; it degrades to a readable branded fallback, and the loading splash can no longer hang forever.

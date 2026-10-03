@@ -25,14 +25,19 @@ const nextConfig: NextConfig = {
       {
         source: "/",
         headers: [
+          // Always revalidate the HTML document so a deploy is picked up
+          // immediately...
           {
             key: "Cache-Control",
             value: "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
           },
-          {
-            key: "Clear-Site-Data",
-            value: '"cache"',
-          },
+          // ...but do NOT send `Clear-Site-Data: "cache"` here. It wipes the
+          // whole origin HTTP cache on *every single* visit, so the JS chunks
+          // and the 3.2 MB GLB are re-downloaded from scratch each load (and
+          // Chrome can abort subresource requests that are already in flight
+          // when it processes the header). That turned a warm reload into a
+          // multi-megabyte cold start — the "stuck on loading" symptom.
+          // The immutable, content-hashed asset rules below handle freshness.
         ],
       },
       {
