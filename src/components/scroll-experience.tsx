@@ -61,6 +61,7 @@ import {
 } from '@/types/configurator'
 import ConfiguratorDock from '@/components/configurator-dock'
 import CockpitOverlay from '@/components/cockpit-overlay'
+import { detectWebGL } from '@/lib/webgl-support'
 import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/locations'
 
 export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
@@ -1082,6 +1083,20 @@ export default function ScrollExperience() {
   const initialSceneRef = useRef<SceneId>(sceneId)
   const [cockpitMode, setCockpitMode] = useState(false)
   const [xrayValues, setXrayValues] = useState<number[]>(() => SPEC_STATS.map(() => 0))
+  /** Set when the 3D stage cannot start (no WebGL, or init threw). Renders a
+   *  readable fallback instead of letting the error unmount the whole app.
+   *
+   *  WebGL is probed in the lazy initialiser (i.e. during render, not in an
+   *  effect) so we never even mount the canvas on a device that cannot drive
+   *  it — `new THREE.WebGLRenderer()` throws in that case, and an uncaught
+   *  throw inside the init effect tears down the whole React root. */
+  const [stageError, setStageError] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null // SSR: let the client decide
+    const support = detectWebGL()
+    if (support.ok) return null
+    console.error('[scroll-experience] WebGL unavailable:', support.reason)
+    return support.reason
+  })
 
   const scrollProgressRef = useRef(0)
   const lenisInstanceRef = useRef<Lenis | null>(null)
@@ -1249,6 +1264,22 @@ export default function ScrollExperience() {
     )
       return
 
+    /* ── Fail-safe boot ────────────────────────────────────────────────
+     * Everything below (WebGLRenderer, PMREM, procedural scene build,
+     * GSAP/Lenis wiring) runs synchronously inside this effect. A throw here
+     * used to propagate out of the effect, which makes React unmount the
+     * entire root: the page went blank and the "Loading M5 CS Experience"
+     * splash in app/page.tsx never got replaced.
+     *
+     * WebGL itself is probed during render (see `stageError` above), so by
+     * the time we get here a context is obtainable. Everything else still
+     * runs inside try/catch and surfaces a readable fallback rather than
+     * taking the page down with it.
+     * ------------------------------------------------------------------ */
+    let teardown: (() => void) | null = null
+
+    try {
+      teardown = (() => {
     let disposed = false
     gsap.registerPlugin(ScrollTrigger)
 
@@ -2337,7 +2368,22 @@ export default function ScrollExperience() {
 
       renderer.render(scene, camera)
     }
-    gsap.ticker.add(tick)
+    /* A throw inside the render loop would otherwise repeat every single
+     * frame — GSAP keeps calling the callback, so one lost WebGL context
+     * turns into an endless error flood and a frozen picture. Guard it:
+     * the first failure unhooks the loop and shows the fallback panel. */
+    const safeTick = (time: number, deltaMs: number) => {
+      try {
+        tick(time, deltaMs)
+      } catch (err) {
+        console.error('[scroll-experience] render loop stopped:', err)
+        gsap.ticker.remove(safeTick)
+        const message =
+          err instanceof Error ? err.message : 'The 3D render loop stopped unexpectedly.'
+        queueMicrotask(() => setStageError(message))
+      }
+    }
+    gsap.ticker.add(safeTick)
     gsap.ticker.lagSmoothing(0)
 
     /* ── Resize: reproject the camera, resize the renderer, refresh
@@ -2368,7 +2414,7 @@ export default function ScrollExperience() {
       window.clearTimeout(refreshTimer)
       mm.revert() // kills the ScrollTriggers/tweens created per breakpoint
       ScrollTrigger.getAll().forEach((st) => st.kill()) // safety net
-      gsap.ticker.remove(tick)
+      gsap.ticker.remove(safeTick)
       lenis?.destroy()
       scene.traverse((obj) => {
         const o = obj as THREE.Mesh
@@ -2401,7 +2447,101 @@ export default function ScrollExperience() {
       renderer.forceContextLoss()
       renderer.dispose()
     }
+      })()
+    } catch (err) {
+      // The 3D stage failed to boot. Keep the React tree alive so the user
+      // gets the fallback panel (and the real reason) instead of a dead page.
+      console.error('[scroll-experience] 3D stage failed to initialise:', err)
+      // Scheduled rather than called inline: this runs during the effect
+      // commit, and a synchronous setState here would cascade an extra render
+      // pass before the current one has settled.
+      const message =
+        err instanceof Error ? err.message : 'The 3D stage could not be initialised.'
+      queueMicrotask(() => setStageError(message))
+      try {
+        teardown?.()
+      } catch {
+        /* already broken — nothing useful to do */
+      }
+      teardown = null
+    }
+
+    return () => {
+      try {
+        teardown?.()
+      } catch (err) {
+        console.warn('[scroll-experience] teardown failed:', err)
+      }
+    }
   }, [])
+
+  /* ═══════════════ Fallback when the 3D stage cannot boot ═════════════ */
+
+  if (stageError) {
+    return (
+      <main className="relative flex min-h-screen w-full items-center justify-center bg-[#050608] px-6 text-[#f2efe7]">
+        <div className="w-full max-w-[560px] text-center">
+          <img
+            src="/bmw-logo.svg"
+            alt="BMW"
+            width={52}
+            height={52}
+            className="mx-auto mb-7 h-[52px] w-[52px] object-contain opacity-90"
+          />
+
+          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/70">
+            BMW M5 CS
+          </p>
+          <h1 className="m-0 mt-3 text-[clamp(24px,5vw,38px)] font-semibold leading-[1.15] tracking-[-0.02em] text-[#f7f4ec]">
+            Engineered for <span className="text-white">the Apex</span>
+          </h1>
+          <p className="m-0 mt-5 text-[15px] leading-[1.7] text-white/70">
+            The most powerful BMW 5 Series of all time — a 627 hp twin-turbo V8 stripped of 70 kg
+            and sharpened on the Nürburgring.
+          </p>
+
+          <div className="mt-9 rounded-2xl border border-white/12 bg-white/[0.04] p-5 text-left">
+            <p className="m-0 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#FFB733]">
+              3D showcase unavailable
+            </p>
+            <p className="m-0 mt-2.5 text-[13.5px] leading-[1.65] text-white/65">{stageError}</p>
+            <p className="m-0 mt-3 text-[13px] leading-[1.65] text-white/45">
+              Enable hardware acceleration in your browser settings, then reload. The interactive
+              studio needs WebGL to render the car.
+            </p>
+          </div>
+
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+            {SPEC_STATS.slice(0, 3).map((stat) => (
+              <div
+                key={stat.id}
+                className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-left"
+              >
+                <p className="m-0 text-[17px] font-semibold tabular-nums text-[#f7f4ec]">
+                  {stat.value.toLocaleString(undefined, {
+                    minimumFractionDigits: stat.decimals ?? 0,
+                    maximumFractionDigits: stat.decimals ?? 0,
+                  })}
+                  <span className="ml-1 text-[11px] font-normal text-white/50">{stat.unit}</span>
+                </p>
+                <p className="m-0 mt-0.5 text-[10px] uppercase tracking-[0.16em] text-white/45">
+                  {stat.label}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-8 cursor-pointer rounded-full border border-white/20 bg-white/10 px-6 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-white/20"
+          >
+            Try again
+          </button>
+        </div>
+      </main>
+    )
+  }
 
   /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
 
