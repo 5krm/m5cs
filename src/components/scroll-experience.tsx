@@ -56,9 +56,15 @@ import {
   CALIPER_CONFIGS,
   SPEC_STATS,
   COCKPIT_CALLOUTS,
-  getInitialSceneId,
   getRandomSceneId,
 } from '@/types/configurator'
+import type { BuildConfiguration } from '@/lib/build-config'
+import {
+  BUILD_STORAGE_KEY,
+  DEFAULT_BUILD_CONFIGURATION,
+  getInitialBuildConfiguration,
+  serializeBuildConfiguration,
+} from '@/lib/build-config'
 import ConfiguratorDock from '@/components/configurator-dock'
 import CockpitOverlay from '@/components/cockpit-overlay'
 import { detectWebGL } from '@/lib/webgl-support'
@@ -1050,6 +1056,43 @@ function starDotStyle(dot: StarDot): CSSProperties {
   }
 }
 
+async function readModelResponse(
+  response: Response,
+  reportProgress: (progress: number) => void,
+): Promise<ArrayBuffer> {
+  if (!response.body) {
+    const buffer = await response.arrayBuffer()
+    reportProgress(0.94)
+    return buffer
+  }
+
+  const total = Number(response.headers.get('content-length')) || 0
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let loaded = 0
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    chunks.push(value)
+    loaded += value.byteLength
+    const progress = total > 0
+      ? Math.min(0.94, (loaded / total) * 0.94)
+      : Math.min(0.9, 0.08 + (1 - Math.exp(-loaded / 420_000)) * 0.82)
+    reportProgress(progress)
+  }
+
+  const bytes = new Uint8Array(loaded)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  reportProgress(0.94)
+  return bytes.buffer
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * Component
  * ══════════════════════════════════════════════════════════════════════ */
@@ -1065,11 +1108,10 @@ export default function ScrollExperience() {
   const endCardRef = useRef<HTMLDivElement>(null)
   const xrayProgressRef = useRef(0)
 
-  const [theme, setTheme] = useState<StudioTheme>('apex')
-  const [highBeams, setHighBeams] = useState(true)
-  const [paint, setPaint] = useState<PaintFinish>('brands-hatch-grey')
-  const [wheelFinish, setWheelFinish] = useState<WheelFinish>('gold-bronze')
-  const [caliperColor, setCaliperColor] = useState<CaliperColor>('red')
+  const [buildConfiguration, setBuildConfiguration] = useState<BuildConfiguration>(() =>
+    getInitialBuildConfiguration(),
+  )
+  const { theme, highBeams, paint, wheelFinish, caliperColor, sceneId } = buildConfiguration
   const [hoodOpen, setHoodOpen] = useState(false)
   const [doorOpen, setDoorOpen] = useState(false)
   const [orbitMode, setOrbitMode] = useState(false)
@@ -1077,8 +1119,11 @@ export default function ScrollExperience() {
   const [scrollProgress, setScrollProgress] = useState(0)
   const [showText, setShowText] = useState(true)
   const [showBookingModal, setShowBookingModal] = useState(false)
-  const [bookingConfirmed, setBookingConfirmed] = useState(false)
-  const [sceneId, setSceneId] = useState<SceneId>(() => getInitialSceneId())
+  const [shareMessage, setShareMessage] = useState('')
+  const [modelStatus, setModelStatus] = useState<{ phase: 'loading' | 'ready' | 'error'; progress: number; message?: string }>({
+    phase: 'loading',
+    progress: 0,
+  })
   const [sceneFacts, setSceneFacts] = useState<Array<{ label: string; value: string }>>([])
   const initialSceneRef = useRef<SceneId>(sceneId)
   const [cockpitMode, setCockpitMode] = useState(false)
@@ -1109,6 +1154,7 @@ export default function ScrollExperience() {
   const toggleOrbitRef = useRef<((active: boolean) => void) | null>(null)
   const setSceneRef = useRef<((id: SceneId) => void) | null>(null)
   const toggleCockpitRef = useRef<((active: boolean, mode: MMode) => void) | null>(null)
+  const shareTimerRef = useRef<number | null>(null)
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
 
   const scrollToSection = useCallback((section: SectionId) => {
@@ -1129,31 +1175,43 @@ export default function ScrollExperience() {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(BUILD_STORAGE_KEY, JSON.stringify(buildConfiguration))
+    } catch {
+      // Storage may be unavailable in private browsing; the in-memory build still works.
+    }
+  }, [buildConfiguration])
+
+  useEffect(() => () => {
+    if (shareTimerRef.current !== null) window.clearTimeout(shareTimerRef.current)
+  }, [])
+
   const handleThemeChange = useCallback((newTheme: StudioTheme) => {
-    setTheme(newTheme)
-    updateThemeRef.current?.(newTheme, highBeams)
-  }, [highBeams])
+    setBuildConfiguration((current) => ({ ...current, theme: newTheme }))
+    updateThemeRef.current?.(newTheme, buildConfiguration.highBeams)
+  }, [buildConfiguration.highBeams])
 
   const toggleHighBeams = useCallback(() => {
-    setHighBeams((prev) => {
-      const next = !prev
-      updateThemeRef.current?.(theme, next)
-      return next
+    setBuildConfiguration((current) => {
+      const next = !current.highBeams
+      updateThemeRef.current?.(current.theme, next)
+      return { ...current, highBeams: next }
     })
-  }, [theme])
+  }, [])
 
   const handlePaintChange = useCallback((finish: PaintFinish) => {
-    setPaint(finish)
+    setBuildConfiguration((current) => ({ ...current, paint: finish }))
     updatePaintRef.current?.(finish)
   }, [])
 
   const handleWheelChange = useCallback((finish: WheelFinish) => {
-    setWheelFinish(finish)
+    setBuildConfiguration((current) => ({ ...current, wheelFinish: finish }))
     updateWheelRef.current?.(finish)
   }, [])
 
   const handleCaliperChange = useCallback((color: CaliperColor) => {
-    setCaliperColor(color)
+    setBuildConfiguration((current) => ({ ...current, caliperColor: color }))
     updateCaliperRef.current?.(color)
   }, [])
 
@@ -1188,12 +1246,7 @@ export default function ScrollExperience() {
   }, [])
 
   const handleSceneChange = useCallback((id: SceneId) => {
-    setSceneId(id)
-    if (typeof window !== 'undefined') {
-      try {
-        sessionStorage.setItem('m5cs_active_scene', id)
-      } catch {}
-    }
+    setBuildConfiguration((current) => ({ ...current, sceneId: id }))
     setSceneRef.current?.(id)
   }, [])
 
@@ -1201,6 +1254,37 @@ export default function ScrollExperience() {
     const next = getRandomSceneId(sceneId)
     handleSceneChange(next)
   }, [sceneId, handleSceneChange])
+
+  const handleShareBuild = useCallback(async () => {
+    const url = new URL(window.location.href)
+    url.search = serializeBuildConfiguration(buildConfiguration)
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+
+    try {
+      await navigator.clipboard.writeText(url.toString())
+      setShareMessage('Copied')
+    } catch {
+      setShareMessage('Link ready')
+    }
+
+    if (shareTimerRef.current !== null) window.clearTimeout(shareTimerRef.current)
+    shareTimerRef.current = window.setTimeout(() => setShareMessage(''), 2200)
+  }, [buildConfiguration])
+
+  const handleResetBuild = useCallback(() => {
+    setBuildConfiguration({ ...DEFAULT_BUILD_CONFIGURATION })
+    updateThemeRef.current?.(DEFAULT_BUILD_CONFIGURATION.theme, DEFAULT_BUILD_CONFIGURATION.highBeams)
+    updatePaintRef.current?.(DEFAULT_BUILD_CONFIGURATION.paint)
+    updateWheelRef.current?.(DEFAULT_BUILD_CONFIGURATION.wheelFinish)
+    updateCaliperRef.current?.(DEFAULT_BUILD_CONFIGURATION.caliperColor)
+    setSceneRef.current?.(DEFAULT_BUILD_CONFIGURATION.sceneId)
+    setOrbitMode(false)
+    toggleOrbitRef.current?.(false)
+    setCockpitMode(false)
+    toggleCockpitRef.current?.(false, 'road')
+    setShowText(true)
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.hash}`)
+  }, [])
 
   const handleCockpitToggle = useCallback(() => {
     setCockpitMode((prev) => {
@@ -1281,6 +1365,7 @@ export default function ScrollExperience() {
     try {
       teardown = (() => {
     let disposed = false
+    let modelRequestController: AbortController | null = null
     gsap.registerPlugin(ScrollTrigger)
 
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -1799,20 +1884,41 @@ export default function ScrollExperience() {
       }
     }
 
-    const setLocation = (id: SceneId, instant = false) => {
-      if ((activeLocation?.id ?? 'studio') === id && !instant) return
+    let locationRequestSequence = 0
+    let requestedLocationId: SceneId | null = null
+    const setLocation = async (id: SceneId, instant = false) => {
+      if (requestedLocationId === id) return
+      // Clicking the currently active location cancels an in-flight swap.
+      const requestId = ++locationRequestSequence
+      requestedLocationId = id
+      if ((activeLocation?.id ?? 'studio') === id) {
+        requestedLocationId = null
+        return
+      }
+
+      const mobile = window.innerWidth < 768
+      let next: LocationScene | null = null
+      try {
+        next = await buildLocationScene(id, { mobile })
+      } catch (err) {
+        if (disposed || requestId !== locationRequestSequence) return
+        requestedLocationId = null
+        const fallbackId = activeLocation?.id ?? 'studio'
+        setBuildConfiguration((current) => ({ ...current, sceneId: fallbackId }))
+        console.warn('[scroll-experience] location build failed; keeping the current environment:', err)
+        return
+      }
+
+      if (disposed || requestId !== locationRequestSequence) {
+        next?.dispose()
+        return
+      }
+      requestedLocationId = null
+
       if (activeLocation) {
         scene.remove(activeLocation.group)
         activeLocation.dispose()
         activeLocation = null
-      }
-      const mobile = window.innerWidth < 768
-      let next: LocationScene | null = null
-      try {
-        next = buildLocationScene(id, { mobile })
-      } catch (err) {
-        console.warn('[scroll-experience] location build failed, staying in the studio:', err)
-        next = null
       }
       activeLocation = next
       studio.visible = !next
@@ -1827,21 +1933,20 @@ export default function ScrollExperience() {
         applyEnvironment(null)
         applyLighting(STUDIO_LIGHTING, instant)
         if (mirrorRigRef) mirrorRigRef.visible = true
-        applyTheme(currentTheme, currentHighBeams) // restores theme-tinted key/rim
+        applyTheme(currentTheme, currentHighBeams)
       }
       setSceneFacts(next?.facts ?? [])
       applyBeams()
-      // let the new environment settle in from black
       if (!instant) {
         gsap.fromTo(canvas, { opacity: 0.15 }, { opacity: 1, duration: 0.7, ease: 'power2.out' })
       }
     }
     setSceneRef.current = (id: SceneId) => setLocation(id, false)
 
-    // Apply the initial random location if not the studio baseline
+    // Restore a saved/shared location after the default studio has mounted.
     const initialLocation = initialSceneRef.current
-    if (initialLocation && initialLocation !== 'studio') {
-      setLocation(initialLocation, true)
+    if (initialLocation !== 'studio') {
+      void setLocation(initialLocation, true)
     }
 
     let carRig: CarRig | null = null
@@ -1879,47 +1984,51 @@ export default function ScrollExperience() {
     }
     updatePaintRef.current = applyPaint
 
-    /* ── Model streaming — REAL progress % into the loading overlay ──
-     * GLTFLoader.load()'s onProgress is unreliable (Content-Length is lost
-     * on some CDNs), so we fetch the GLB ourselves, count bytes against the
-     * header (falling back to an asymptotic trickle), hand the buffer to
-     * GLTFLoader.parse with the MeshoptDecoder, then fade the overlay.
-     * The car settle-in doubles as the reveal beat after the fade. */
+    /* ── Stream the GLB and report actual download progress ────────── */
     ;(async () => {
+      const controller = new AbortController()
+      modelRequestController = controller
+
+      const reportProgress = (progress: number, message: string) => {
+        if (disposed) return
+        setModelStatus({ phase: 'loading', progress: Math.min(0.99, Math.max(0, progress)), message })
+      }
+
       try {
         let arrayBuffer: ArrayBuffer | null = null
+        let cache: Cache | null = null
 
-        // Try CacheStorage first for instant loading
-        if (typeof window !== 'undefined' && 'caches' in window) {
+        if ('caches' in window) {
           try {
-            const cache = await caches.open('bmw-m5-cs-cache-v1')
+            cache = await window.caches.open('bmw-m5-cs-cache-v2')
             const match = await cache.match(MODEL_URL)
             if (match) {
               arrayBuffer = await match.arrayBuffer()
-            } else {
-              const netRes = await fetch(MODEL_URL)
-              if (netRes.ok) {
-                cache.put(MODEL_URL, netRes.clone()).catch(() => {})
-                arrayBuffer = await netRes.arrayBuffer()
-              }
+              reportProgress(0.94, 'Using the saved vehicle model')
             }
           } catch {
-            // Fallback gracefully to network fetch
+            // CacheStorage is an optimization, never a requirement.
+            cache = null
           }
         }
 
         if (!arrayBuffer) {
-          const res = await fetch(MODEL_URL)
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          arrayBuffer = await res.arrayBuffer()
+          const response = await fetch(MODEL_URL, { signal: controller.signal })
+          if (!response.ok) throw new Error(`Vehicle model request failed (HTTP ${response.status}).`)
+          if (cache) void cache.put(MODEL_URL, response.clone()).catch(() => {})
+          arrayBuffer = await readModelResponse(response, (progress) => {
+            reportProgress(progress, 'Downloading vehicle geometry')
+          })
         }
 
         if (disposed) return
+        reportProgress(0.96, 'Preparing 3D materials')
 
         const loader = new GLTFLoader()
         loader.setMeshoptDecoder(MeshoptDecoder)
         const gltf = await loader.parseAsync(arrayBuffer, '')
         if (disposed) return
+        reportProgress(0.98, 'Fitting the car to the studio')
 
         carRig = buildCarRig(gltf.scene, paint, wheelFinish, caliperColor)
 
@@ -1941,25 +2050,16 @@ export default function ScrollExperience() {
 
         // Measure + detect BEFORE parenting: Box3.setFromObject() works in
         // WORLD space, so measuring inside the yawed carGroup bakes BASE_YAW
-        // into the footprint — that inflates width by ~35 % and shoved the
-        // old patches ~0.3 m outboard of the tires. Rig unparented ⇒ world
-        // space == rig-local space.
+        // into the footprint. Rig unparented ⇒ world == rig-local space.
         const footprint = new THREE.Box3().setFromObject(carRig.car)
         const carSize = footprint.getSize(new THREE.Vector3())
         const hubs = detectWheelHubs(carRig.car, carSize)
 
         carRig.car.position.y = -0.12
         carGroup.add(carRig.car)
-
-        // Hug the body-AO ellipse to the measured footprint (was a fixed
-        // TARGET_LENGTH-sized plane that spilled half a metre past the
-        // bumpers and read as a dark halo floating around the car).
         contact.geometry.dispose()
         contact.geometry = new THREE.PlaneGeometry(carSize.x * 1.02, carSize.z * 1.18)
 
-        // Per-wheel contact patches anchored at the detected hubs — each
-        // blob now sits centered under its tire instead of guessing from
-        // footprint fractions (the source mesh merges/misnames wheels).
         const wheelTex = makeWheelShadowTexture()
         const wheelShadowMat = new THREE.MeshBasicMaterial({
           map: wheelTex,
@@ -1975,9 +2075,6 @@ export default function ScrollExperience() {
           carGroup.add(patch)
         }
 
-        // Mirrored double just below y = 0 — shows through the semi-
-        // transparent floor as a soft showroom reflection (desktop only;
-        // the doubled vertex load isn't worth it on phones).
         if (FLOOR_REFLECTION && window.innerWidth >= 768) {
           const mirrorRig = buildCarRig(gltf.scene, paint)
           mirrorRig.car.scale.y = -1
@@ -1990,7 +2087,7 @@ export default function ScrollExperience() {
               : [obj.material.clone()]
             for (const m of mats) {
               const std = m as THREE.MeshStandardMaterial
-              std.side = THREE.DoubleSide // negative scale flips winding
+              std.side = THREE.DoubleSide
               std.envMapIntensity = Math.min(0.5, (std.envMapIntensity ?? 1) * 0.6)
             }
             obj.material = Array.isArray(obj.material) ? mats : mats[0]
@@ -2000,12 +2097,15 @@ export default function ScrollExperience() {
           mirrorRig.car.visible = (activeLocation as LocationScene | null)?.lighting.floorReflection ?? true
         }
 
-        gsap.to(carRig!.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
-        // the user may have scrolled into the X-ray band before the model landed
-        carRig!.setXray(xrayProgressRef.current)
-        if (cockpitState.active) carRig!.setCockpit(true, cockpitState.mode)
+        gsap.to(carRig.car.position, { y: 0, duration: 0.8, ease: 'power2.out' })
+        carRig.setXray(xrayProgressRef.current)
+        if (cockpitState.active) carRig.setCockpit(true, cockpitState.mode)
+        setModelStatus({ phase: 'ready', progress: 1 })
       } catch (err) {
+        if (disposed || controller.signal.aborted) return
+        const message = err instanceof Error ? err.message : 'The vehicle model could not be prepared.'
         console.warn('[scroll-experience] car model failed to load:', err)
+        setModelStatus({ phase: 'error', progress: 0, message })
       }
     })()
 
@@ -2404,6 +2504,9 @@ export default function ScrollExperience() {
     /* ── Teardown — no memory leaks ────────────────────────────────── */
     return () => {
       disposed = true
+      locationRequestSequence += 1
+      requestedLocationId = null
+      modelRequestController?.abort()
       lenisInstanceRef.current = null
       canvas.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointermove', onPointerMove)
@@ -2565,6 +2668,49 @@ export default function ScrollExperience() {
         className="fixed inset-0 z-0 block h-full w-full"
       />
 
+      {modelStatus.phase !== 'ready' && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center p-5" aria-live="polite">
+          <div className="pointer-events-auto w-full max-w-[350px] rounded-2xl border border-white/15 bg-[#080a0f]/90 p-5 text-white shadow-2xl backdrop-blur-xl">
+            <p className="m-0 text-[9px] font-semibold uppercase tracking-[0.28em] text-[#FFB733]">BMW M5 CS · 3D Experience</p>
+            <h2 className="m-0 mt-2 text-[16px] font-semibold tracking-tight">
+              {modelStatus.phase === 'loading' ? 'Preparing the car' : 'The 3D model could not load'}
+            </h2>
+            {modelStatus.phase === 'loading' ? (
+              <>
+                <div className="mt-4 flex items-center justify-between text-[10px] text-white/55">
+                  <span>{modelStatus.message ?? 'Loading vehicle geometry'}</span>
+                  <span className="font-mono tabular-nums">{Math.round(modelStatus.progress * 100)}%</span>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label="Loading the M5 CS model"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(modelStatus.progress * 100)}
+                  className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#E4002B] via-[#1C69D4] to-[#009ADA] transition-[width] duration-200"
+                    style={{ width: `${Math.max(3, modelStatus.progress * 100)}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="m-0 mt-2 text-[12px] leading-relaxed text-white/60">{modelStatus.message}</p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mt-4 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[11px] font-medium text-white transition-colors hover:bg-white/20"
+                >
+                  Retry loading
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Fixed UI overlay */}
       <div className="pointer-events-none fixed inset-0 z-10">
         {/* ── Navbar (100% Transparent Header with Official BMW Logo) ── */}
@@ -2622,7 +2768,7 @@ export default function ScrollExperience() {
               className="group relative flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/30 hover:bg-black/45 px-5 py-2 text-[12px] font-medium tracking-wide text-white shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-[#E4002B] animate-pulse" />
-              <span>Book a Drive</span>
+              <span>Drive info</span>
             </button>
           </div>
         </header>
@@ -2666,7 +2812,7 @@ export default function ScrollExperience() {
               onClick={() => scrollToSection('performance')}
               className="cta-btn pointer-events-auto cursor-pointer"
             >
-              Explore the M5 CS
+              Configure your M5 CS
               <svg
                 width="18"
                 height="18"
@@ -2788,10 +2934,10 @@ export default function ScrollExperience() {
           </h2>
           <button
             type="button"
-            onClick={() => setShowBookingModal(true)}
+            onClick={() => void handleShareBuild()}
             className="cta-btn pointer-events-auto mt-8 cursor-pointer"
           >
-            <span>Reserve Yours</span>
+            <span>{shareMessage ? `Build link ${shareMessage.toLowerCase()}` : 'Share this build'}</span>
             <svg
               width="18"
               height="18"
@@ -2818,6 +2964,13 @@ export default function ScrollExperience() {
           onToggleHighBeams={toggleHighBeams}
           paint={paint}
           onPaintChange={handlePaintChange}
+          wheelFinish={wheelFinish}
+          onWheelChange={handleWheelChange}
+          caliperColor={caliperColor}
+          onCaliperChange={handleCaliperChange}
+          onShare={handleShareBuild}
+          onReset={handleResetBuild}
+          shareMessage={shareMessage}
           orbitMode={orbitMode}
           onToggleOrbit={handleOrbitToggle}
           sceneId={sceneId}
@@ -2838,138 +2991,73 @@ export default function ScrollExperience() {
         />
       </div>
 
-      {/* ── Test Drive Reservation Modal ── */}
+      {/* ── Honest demo hand-off: no pretend booking confirmation ── */}
       {showBookingModal && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="booking-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-200"
+          aria-describedby="booking-description"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl animate-in fade-in duration-200"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setShowBookingModal(false)
+          }}
         >
-          <div className="relative w-full max-w-lg rounded-3xl border border-white/20 bg-[#0c0f16] p-6 sm:p-8 shadow-2xl">
+          <div className="relative w-full max-w-[520px] rounded-3xl border border-white/15 bg-[#0c0f16] p-6 shadow-2xl sm:p-8">
             <button
               type="button"
-              onClick={() => {
-                setShowBookingModal(false)
-                setBookingConfirmed(false)
-              }}
-              aria-label="Close modal"
-              className="absolute top-5 right-5 rounded-full p-2 text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              onClick={() => setShowBookingModal(false)}
+              aria-label="Close drive information"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-white/55 transition-colors hover:bg-white/10 hover:text-white"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+              <span aria-hidden="true">×</span>
             </button>
 
-            {bookingConfirmed ? (
-              <div className="py-6 text-center">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#009ADA]/20 text-[#009ADA] border border-[#009ADA]/40">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                </div>
-                <h3 className="m-0 mb-2 text-[22px] font-bold text-white">Reservation Request Confirmed</h3>
-                <p className="m-0 mb-6 text-[14px] text-white/70 leading-relaxed">
-                  A certified BMW M Client Advisor will reach out to coordinate your private session with the M5 CS in {PAINT_CONFIGS[paint].name}.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowBookingModal(false)
-                    setBookingConfirmed(false)
-                  }}
-                  className="rounded-full bg-white px-6 py-2.5 text-[13px] font-semibold text-black hover:bg-white/90 transition-all cursor-pointer"
-                >
-                  Return to Experience
-                </button>
-              </div>
-            ) : (
+            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.28em] text-[#FFB733]">
+              Private drive
+            </p>
+            <h2 id="booking-title" className="m-0 mt-3 max-w-[390px] text-[clamp(22px,4vw,30px)] font-semibold leading-tight tracking-[-0.02em] text-white">
+              Take your build to a BMW retailer.
+            </h2>
+            <p id="booking-description" className="m-0 mt-4 text-[13px] leading-relaxed text-white/65">
+              This is an unofficial concept experience. Drive requests are not connected to BMW or a dealer, and this page does not collect or send personal information. Contact your local BMW retailer to ask about availability.
+            </p>
+
+            <dl className="m-0 mt-6 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
               <div>
-                <div className="mb-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#FFB733]" />
-                    <span className="text-[11px] font-bold uppercase tracking-[0.25em] text-[#e8ddc4]">
-                      Private M Client Experience
-                    </span>
-                  </div>
-                  <h3 id="booking-title" className="m-0 text-[24px] font-bold text-white tracking-tight">
-                    Reserve Your M5 CS Session
-                  </h3>
-                  <p className="m-0 mt-1 text-[13px] text-white/60">
-                    Selected finish: <strong className="text-white">{PAINT_CONFIGS[paint].name}</strong> · 627 HP Twin-Turbo V8
-                  </p>
-                </div>
-
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    setBookingConfirmed(true)
-                  }}
-                  className="space-y-4"
-                >
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
-                      Full Name
-                    </label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. Marcus Vance"
-                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
-                      Email Address
-                    </label>
-                    <input
-                      required
-                      type="email"
-                      placeholder="m.vance@executive.com"
-                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
-                        City / Region
-                      </label>
-                      <input
-                        required
-                        type="text"
-                        placeholder="Munich, Germany"
-                        className="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-[13px] text-white placeholder:text-white/30 focus:border-white/40 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/60 mb-1.5">
-                        Preferred Paint
-                      </label>
-                      <select
-                        value={paint}
-                        onChange={(e) => handlePaintChange(e.target.value as PaintFinish)}
-                        className="w-full rounded-xl border border-white/15 bg-[#121620] px-3.5 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none"
-                      >
-                        {(Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((p) => (
-                          <option key={p} value={p}>
-                            {PAINT_CONFIGS[p].name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full mt-2 rounded-xl bg-gradient-to-r from-[#1C69D4] to-[#009ADA] hover:from-[#185ec2] hover:to-[#0089c2] py-3 text-[13px] font-semibold text-white shadow-lg transition-all active:scale-[0.98] cursor-pointer"
-                  >
-                    Confirm Private Session Request
-                  </button>
-                </form>
+                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">Paint</dt>
+                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{PAINT_CONFIGS[paint].name}</dd>
               </div>
-            )}
+              <div>
+                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">Wheels</dt>
+                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{WHEEL_CONFIGS[wheelFinish].name}</dd>
+              </div>
+              <div>
+                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">Calipers</dt>
+                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{CALIPER_CONFIGS[caliperColor].name}</dd>
+              </div>
+              <div>
+                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">Location</dt>
+                <dd className="m-0 mt-1 text-[12px] font-medium capitalize text-white/90">{sceneId.replaceAll('-', ' ')}</dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBookingModal(false)}
+                className="rounded-full border border-white/15 px-5 py-2.5 text-[12px] font-medium text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                Back to experience
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleShareBuild()}
+                className="rounded-full bg-white px-5 py-2.5 text-[12px] font-semibold text-black transition-colors hover:bg-white/85"
+              >
+                {shareMessage ? `Build link ${shareMessage.toLowerCase()}` : 'Copy this build link'}
+              </button>
+            </div>
           </div>
         </div>
       )}
