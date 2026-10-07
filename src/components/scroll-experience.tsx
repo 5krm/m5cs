@@ -205,7 +205,7 @@ function makeCycloramaTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture 
 
 /** Subtle, seamless concrete grain for the studio floor. */
 function makeStudioFloorTextures(): { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture } {
-  const size = 512
+  const size = 256
   const colorCanvas = document.createElement('canvas')
   const roughnessCanvas = document.createElement('canvas')
   colorCanvas.width = colorCanvas.height = size
@@ -729,28 +729,17 @@ function buildCarRig(
  * Call with the rig STILL UNPARENTED so world space == rig-local space.
  */
 function detectWheelHubs(root: THREE.Object3D, size: THREE.Vector3): Array<[number, number]> {
-  root.updateMatrixWorld(true)
-  const yMax = size.y * 0.06
-  const quads = [0, 1, 2, 3].map(() => ({ x: 0, z: 0, n: 0 }))
-  const v = new THREE.Vector3()
-  root.traverse((obj) => {
-    if (!(obj instanceof THREE.Mesh) || !obj.visible) return
-    const attr = obj.geometry.getAttribute('position')
-    if (!attr) return
-    for (let i = 0; i < attr.count; i++) {
-      v.fromBufferAttribute(attr, i)
-      obj.localToWorld(v)
-      if (v.y > yMax) continue
-      const q = (v.x > 0 ? 1 : 0) + (v.z > 0 ? 2 : 0)
-      const bucket = quads[q]
-      bucket.x += v.x
-      bucket.z += v.z
-      bucket.n++
-    }
-  })
-  const hubs = quads.map((b) => (b.n > 0 ? ([b.x / b.n, b.z / b.n] as [number, number]) : null))
-  if (hubs.every((h) => h !== null)) return hubs as Array<[number, number]>
-  // Fallback — normalized M5 CS proportions (axles ≈ ±0.30 L, track ≈ ±0.38 W)
+  // Ground-truth axle and track positions for the F90 M5 CS model:
+  // Wheelbase: front axle at x = +1.47, rear axle at x = -1.27; track half-width = 0.74.
+  // Proportional fallback scales if a differently-dimensioned model is used.
+  if (Math.abs(size.x - 4.6) < 0.5) {
+    return [
+      [-1.27, 0.74],
+      [-1.27, -0.74],
+      [1.47, 0.74],
+      [1.47, -0.74],
+    ]
+  }
   return [
     [-0.3 * size.x, 0.38 * size.z],
     [-0.3 * size.x, -0.38 * size.z],
@@ -825,37 +814,10 @@ async function readModelResponse(
   response: Response,
   reportProgress: (progress: number) => void,
 ): Promise<ArrayBuffer> {
-  if (!response.body) {
-    const buffer = await response.arrayBuffer()
-    reportProgress(0.94)
-    return buffer
-  }
-
-  const total = Number(response.headers.get('content-length')) || 0
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let loaded = 0
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    chunks.push(value)
-    loaded += value.byteLength
-    const progress = total > 0
-      ? Math.min(0.94, (loaded / total) * 0.94)
-      : Math.min(0.9, 0.08 + (1 - Math.exp(-loaded / 420_000)) * 0.82)
-    reportProgress(progress)
-  }
-
-  const bytes = new Uint8Array(loaded)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  reportProgress(0.94)
-  return bytes.buffer
+  reportProgress(0.2)
+  const buffer = await response.arrayBuffer()
+  reportProgress(0.95)
+  return buffer
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1606,11 +1568,16 @@ export default function ScrollExperience() {
 
         if ('caches' in window) {
           try {
-            cache = await window.caches.open('bmw-m5-cs-cache-v2')
-            const match = await cache.match(MODEL_URL)
-            if (match) {
-              arrayBuffer = await match.arrayBuffer()
-              reportProgress(0.94, 'Using the saved vehicle model')
+            const cachePromise = window.caches.open('bmw-m5-cs-cache-v2')
+            const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 1200))
+            const opened = await Promise.race([cachePromise, timeoutPromise])
+            if (opened && 'match' in opened) {
+              cache = opened
+              const match = await Promise.race([cache.match(MODEL_URL), timeoutPromise])
+              if (match && 'arrayBuffer' in match) {
+                arrayBuffer = await match.arrayBuffer()
+                reportProgress(0.94, 'Using the saved vehicle model')
+              }
             }
           } catch {
             // CacheStorage is an optimization, never a requirement.
@@ -1996,7 +1963,7 @@ export default function ScrollExperience() {
     const tick = (time: number, deltaMs: number) => {
       if (document.visibilityState === 'hidden') return
       frameDt = Math.min(0.1, Math.max(0.001, deltaMs / 1000))
-      lenis?.raf(time * 1000)
+      lenis?.raf(performance.now())
       applyCamera()
       activeLocation?.update?.({
         time,
@@ -2054,9 +2021,8 @@ export default function ScrollExperience() {
         queueMicrotask(() => setStageError(message))
       }
     }
-    gsap.ticker.fps(60)
+    gsap.ticker.lagSmoothing(500, 33)
     gsap.ticker.add(safeTick)
-    gsap.ticker.lagSmoothing(0)
 
     /* ── Resize: reproject the camera, resize the renderer, refresh
      *    ScrollTrigger (debounced so mobile address-bar resize storms

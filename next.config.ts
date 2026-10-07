@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   // VERCEL=1 for us — so only emit a standalone bundle when NOT building on Vercel.
   output: process.env.VERCEL ? undefined : "standalone",
   allowedDevOrigins: [
+    "ais-dev-b5k63p664bk27z5zcecwww-146330742784.europe-west1.run.app",
+    "ais-pre-b5k63p664bk27z5zcecwww-146330742784.europe-west1.run.app",
     "ais-dev-yoqjexkikwwqkow4o2za5q-146330742784.europe-west1.run.app",
     "ais-pre-yoqjexkikwwqkow4o2za5q-146330742784.europe-west1.run.app",
     "*.run.app",

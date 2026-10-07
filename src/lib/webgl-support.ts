@@ -37,11 +37,6 @@ export function detectWebGL(): { ok: true } | { ok: false; reason: string } {
       }
     }
 
-    // Release the probe context immediately — browsers cap the number of live
-    // contexts (~16), and the real renderer needs one of those slots.
-    const lose = (gl as WebGLRenderingContext).getExtension('WEBGL_lose_context')
-    lose?.loseContext()
-
     return { ok: true }
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : 'WebGL could not be initialised.' }
@@ -49,6 +44,7 @@ export function detectWebGL(): { ok: true } | { ok: false; reason: string } {
     if (canvas) {
       canvas.width = 0
       canvas.height = 0
+      canvas = null
     }
   }
 }
