@@ -7,36 +7,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
+  --color-ring: var(--ring);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -44,150 +17,321 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: #0d1017;
-  --foreground: #f2efe7;
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  color-scheme: dark;
+  --radius: 0.35rem;
+  --background: #090b0e;
+  --foreground: #f1f2f3;
+  --border: rgb(255 255 255 / 0.14);
+  --ring: #a9b0b8;
+  --ink-muted: #a3a8ae;
+  --bmw-red: #d7193f;
+  --panel: rgb(9 11 14 / 0.96);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--background);
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
+  min-height: 100%;
   padding: 0;
-  background: #0d1017;
-  color: #f2efe7;
-  font-family: var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+html[lang='ar'] body,
+html[lang='ar'] button,
+html[lang='ar'] input,
+html[lang='ar'] textarea,
+html[lang='ar'] select,
+[lang='ar'] {
+  font-family: var(--font-plex-sans-arabic), var(--font-inter), Tahoma, Arial, sans-serif;
+}
+
+html[dir='rtl'] body {
+  direction: rtl;
+}
+
+button {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #f1f2f3;
+  outline-offset: 3px;
+}
+
 a {
-  color: #e8ddc4;
+  color: inherit;
   text-decoration: none;
 }
 
-a:hover {
-  color: #f5edd8;
+::selection {
+  color: #fff;
+  background: rgb(215 25 63 / 0.75);
 }
 
-/* ── Page reset / base (BMW M5 CS showcase) ─────────────────────────── */
-html {
-  color-scheme: dark;
+/* Header and navigation: restrained surfaces, clear type, no floating glass pills. */
+.site-header {
+  min-height: 72px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  background: linear-gradient(180deg, rgb(6 7 9 / 0.84), rgb(6 7 9 / 0.34));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 
-/* ── Book a Drive — glassy pill ─────────────────────────────────────── */
-.signin-btn {
-  padding: 10px 26px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+.site-nav-link {
+  position: relative;
+  padding: 10px 2px;
+  color: rgb(241 242 243 / 0.66);
+  transition: color 160ms ease;
+}
+
+.site-nav-link:hover,
+.site-nav-link[aria-current='page'] {
+  color: #fff;
+}
+
+.site-nav-link[aria-current='page']::after {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  left: 0;
+  height: 1px;
+  background: var(--bmw-red);
+  content: '';
+}
+
+.locale-switch {
+  min-width: 54px;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: 3px;
+  background: rgb(0 0 0 / 0.18);
+  color: rgb(255 255 255 / 0.88);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.locale-switch:hover {
+  border-color: rgb(255 255 255 / 0.5);
+  background: rgb(255 255 255 / 0.08);
+}
+
+.editorial-cta {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 1px solid var(--bmw-red);
+  border-radius: 3px;
+  background: var(--bmw-red);
+  padding: 0 20px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.editorial-cta:hover {
+  border-color: #ed294e;
+  background: #ed294e;
+  color: #fff;
+}
+
+.editorial-cta:active {
+  background: #b70f31;
+}
+
+.stage-eyebrow {
+  color: rgb(235 238 241 / 0.72);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+html[lang='ar'] .stage-eyebrow {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Compact, practical vehicle controls. */
+.configurator-root {
+  position: fixed;
+  z-index: 30;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  max-width: calc(100vw - 20px);
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.configurator-panel {
+  max-width: min(92vw, 640px);
+  margin-bottom: 8px;
+  border: 1px solid rgb(255 255 255 / 0.15);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 12px 16px;
+  color: #f4f5f6;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.4);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-  font-size: 13px;
-  font-weight: 400;
-  transition: background-color 200ms ease, border-color 200ms ease;
 }
 
-.signin-btn:hover {
-  background: rgba(255, 255, 255, 0.24);
-  border-color: rgba(255, 255, 255, 0.4);
-  color: #ffffff;
-}
-
-/* ── Primary CTA — pure white pill, black text, no glow ─────────────── */
-.cta-btn {
+.configurator-bar {
   display: flex;
+  max-width: calc(100vw - 20px);
   align-items: center;
-  gap: 10px;
-  padding: 15px 34px;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #000000;
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  transition: transform 180ms ease;
+  gap: 2px;
+  overflow-x: auto;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 6px;
+  background: rgb(8 10 12 / 0.96);
+  padding: 5px;
+  color: #fff;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.38);
+  scrollbar-width: none;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 
-.cta-btn:hover {
-  transform: translateY(-1px);
-  color: #000000;
+.configurator-bar::-webkit-scrollbar {
+  display: none;
 }
 
-.cta-btn:active {
-  transform: translateY(0);
+.config-control {
+  display: inline-flex;
+  min-height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  padding: 0 10px;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-/* ── X-Ray spec panel: horizontal scan-line that tracks the 3D sweep ── */
-.xray-panel::before {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  top: var(--scan, 0%);
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(127, 211, 255, 0.9), transparent);
-  box-shadow: 0 0 14px 2px rgba(127, 211, 255, 0.45);
-  pointer-events: none;
+.config-control:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
 }
-.xray-panel::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: repeating-linear-gradient(
-    0deg,
-    rgba(127, 211, 255, 0.05) 0 1px,
-    transparent 1px 4px
-  );
-  pointer-events: none;
-  mix-blend-mode: screen;
+
+.config-control[aria-pressed='true'],
+.config-control[aria-expanded='true'] {
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
 }
-.xray-badge {
-  animation: xray-blink 1.1s steps(2, end) infinite;
+
+.config-control--share {
+  background: #f1f2f3;
+  color: #111;
 }
-@keyframes xray-blink {
-  50% {
-    opacity: 0.25;
+
+.config-control--share:hover,
+.config-control--share[aria-pressed='true'] {
+  background: #fff;
+  color: #111;
+}
+
+.configurator-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0 4px;
+  background: rgb(255 255 255 / 0.17);
+}
+
+.directional-arrow {
+  flex: 0 0 auto;
+}
+
+html[dir='rtl'] .directional-arrow {
+  transform: scaleX(-1);
+}
+
+/* Logical alignment for the side captions in the mirrored Arabic layout. */
+@media (min-width: 640px) {
+  html[dir='rtl'] .stage-caption-front {
+    right: auto;
+    left: clamp(24px, 7vw, 110px);
+    text-align: left;
+  }
+
+  html[dir='rtl'] .stage-caption-rear {
+    right: clamp(24px, 7vw, 110px);
+    left: auto;
+    text-align: right;
+  }
+
+  html[dir='rtl'] .xray-panel-position {
+    right: auto;
+    left: clamp(20px, 5vw, 72px);
   }
 }
+
+html[dir='rtl'] .cockpit-heading {
+  left: auto;
+  right: clamp(16px, 4vw, 48px);
+}
+
+html[dir='rtl'] .cockpit-callout-label {
+  right: 36px;
+  left: auto;
+  text-align: right;
+}
+
+html[dir='rtl'] .cockpit-callout-line {
+  right: 50%;
+  left: auto;
+}
+
+@media (max-width: 639px) {
+  .site-header {
+    min-height: 64px;
+  }
+
+  .config-control {
+    min-height: 36px;
+    padding-inline: 9px;
+  }
+
+  .configurator-panel {
+    width: min(92vw, 520px);
+    max-height: min(46vh, 360px);
+    overflow: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .xray-badge {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
-}
-
-/* Immersive modes (360° orbit / cockpit) and the copy visibility toggle both
- * override GSAP's inline animation styles for the scroll-driven copy layers. */
-main[data-immersive='true'] [data-scroll-copy],
-main[data-show-text='false'] [data-scroll-copy] {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
 }

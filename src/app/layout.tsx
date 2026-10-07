@@ -1,51 +1,49 @@
-import type { Metadata } from "next";
-import localFont from "next/font/local";
-import "./globals.css";
+import type { Metadata } from 'next'
+import localFont from 'next/font/local'
+import LocaleProvider from '@/components/locale-provider'
+import './globals.css'
 
-// Inter — used for ALL text.
-// Self-hosted via next/font/local (variable wght axis 100–900, Latin subset).
-// Vendored from @fontsource-variable/inter v5.3.0 (Inter, SIL OFL 1.1 — see
-// src/app/fonts/LICENSE.txt) so the build never depends on fonts.googleapis.com.
 const inter = localFont({
   src: [
-    {
-      path: "./fonts/inter-latin-wght-normal.woff2",
-      weight: "100 900",
-      style: "normal",
-    },
-    {
-      path: "./fonts/inter-latin-wght-italic.woff2",
-      weight: "100 900",
-      style: "italic",
-    },
+    { path: './fonts/inter-latin-wght-normal.woff2', weight: '100 900', style: 'normal' },
+    { path: './fonts/inter-latin-wght-italic.woff2', weight: '100 900', style: 'italic' },
   ],
-  variable: "--font-inter",
-  display: "swap",
-  fallback: ["system-ui", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
-});
+  variable: '--font-inter',
+  display: 'swap',
+  fallback: ['system-ui', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif'],
+})
+
+const plexSansArabic = localFont({
+  src: [
+    { path: './fonts/ibm-plex-sans-arabic-400.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/ibm-plex-sans-arabic-500.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/ibm-plex-sans-arabic-600.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/ibm-plex-sans-arabic-700.woff2', weight: '700', style: 'normal' },
+  ],
+  variable: '--font-plex-sans-arabic',
+  display: 'swap',
+  fallback: ['Tahoma', 'Arial', 'sans-serif'],
+})
 
 export const metadata: Metadata = {
-  title: "BMW M5 CS — Engineered for the Apex",
+  title: 'BMW M5 CS | Vehicle Studio',
   description:
-    "Explore and configure the BMW M5 CS in a cinematic 3D showroom. Change its finish, wheels, calipers, lighting, and location, then share your build.",
-  keywords: ["BMW", "BMW M5 CS", "M5 CS", "M5", "twin-turbo V8", "sport sedan", "3D showcase"],
+    'Explore the BMW M5 CS in an interactive 3D studio. Configure the exterior, inspect the details and share your build.',
+  keywords: ['BMW', 'BMW M5 CS', 'M5 CS', 'vehicle configurator', '3D vehicle studio'],
   openGraph: {
-    title: "BMW M5 CS — Engineered for the Apex",
-    description:
-      "A cinematic 3D BMW M5 CS configurator. Choose finishes, explore the car, and share your build.",
-    siteName: "BMW M5 CS",
-    type: "website",
+    title: 'BMW M5 CS | Vehicle Studio',
+    description: 'A considered 3D look at the BMW M5 CS. Configure the car and share your build.',
+    siteName: 'BMW M5 CS Vehicle Studio',
+    type: 'website',
   },
-};
+}
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} antialiased`}>{children}</body>
+    <html lang="en" dir="ltr" suppressHydrationWarning>
+      <body className={`${inter.variable} ${plexSansArabic.variable} antialiased`}>
+        <LocaleProvider>{children}</LocaleProvider>
+      </body>
     </html>
-  );
+  )
 }

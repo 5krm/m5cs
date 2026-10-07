@@ -2,25 +2,20 @@
 
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
+import { useLocale } from '@/components/locale-provider'
+import { getSiteCopy } from '@/lib/site-copy'
 
-interface Props {
+interface BoundaryProps {
   children: ReactNode
+  renderFallback: (error: Error) => ReactNode
 }
 
 interface State {
   error: Error | null
 }
 
-/**
- * Last line of defence around <ScrollExperience>.
- *
- * Without a boundary, any throw during render or inside an effect makes React
- * unmount the entire root — the user is left staring at a blank page (or at
- * the "Loading M5 CS Experience" splash that never resolves, because the
- * mount-gate re-render never commits). This keeps the failure visible and
- * recoverable instead of silent.
- */
-export default class ExperienceErrorBoundary extends Component<Props, State> {
+/** Keeps render-time failures visible and recoverable instead of blanking the page. */
+class ExperienceErrorBoundaryImpl extends Component<BoundaryProps, State> {
   state: State = { error: null }
 
   static getDerivedStateFromError(error: Error): State {
@@ -33,43 +28,61 @@ export default class ExperienceErrorBoundary extends Component<Props, State> {
 
   render() {
     const { error } = this.state
+    return error ? this.props.renderFallback(error) : this.props.children
+  }
+}
 
-    if (!error) return this.props.children
+function ExperienceErrorFallback({ error }: { error: Error }) {
+  const { locale, isArabic } = useLocale()
+  const copy = getSiteCopy(locale)
 
-    return (
-      <main className="relative flex min-h-screen w-full items-center justify-center bg-[#050608] px-6 text-[#f2efe7]">
-        <div className="w-full max-w-[520px] text-center">
-          <img
-            src="/bmw-logo.svg"
-            alt="BMW"
-            width={52}
-            height={52}
-            className="mx-auto mb-7 h-[52px] w-[52px] object-contain opacity-90"
-          />
+  return (
+    <main
+      lang={locale}
+      dir={isArabic ? 'rtl' : 'ltr'}
+      className="relative flex min-h-screen w-full items-center justify-center bg-[#090b0e] px-6 text-[#f1f2f3]"
+    >
+      <div className="w-full max-w-[520px] text-center">
+        <img
+          src="/bmw-logo.svg"
+          alt="BMW"
+          width={52}
+          height={52}
+          className="mx-auto mb-7 h-[52px] w-[52px] object-contain"
+        />
+        <p className="stage-eyebrow m-0">BMW M5 CS</p>
+        <h1 className="m-0 mt-3 text-[clamp(24px,4.5vw,36px)] font-semibold leading-tight text-white">
+          {copy.experienceErrorTitle}
+        </h1>
+        <p className="m-0 mt-4 text-[14px] leading-[1.75] text-white/65">
+          {copy.experienceErrorDescription}
+        </p>
 
-          <p className="m-0 text-[11px] font-medium uppercase tracking-[0.32em] text-[#e8ddc4]/70">
-            BMW M5 CS
-          </p>
-          <h1 className="m-0 mt-3 text-[clamp(22px,4.5vw,32px)] font-semibold tracking-[-0.02em] text-[#f7f4ec]">
-            Something went wrong
-          </h1>
-          <p className="m-0 mt-4 text-[14px] leading-[1.7] text-white/65">
-            The interactive studio stopped before it could finish loading.
-          </p>
-
-          <pre className="mt-6 overflow-x-auto rounded-xl border border-white/12 bg-black/40 p-4 text-left text-[12px] leading-[1.6] text-white/55">
+        <details className="mx-auto mt-6 max-w-[460px] border border-white/10 bg-black/25 p-4 text-start">
+          <summary className="cursor-pointer text-[11px] font-medium text-white/55">
+            {copy.technicalDetails}
+          </summary>
+          <pre dir="ltr" className="mb-0 mt-3 overflow-x-auto whitespace-pre-wrap break-words text-left text-[11px] leading-relaxed text-white/45">
             {error.message || String(error)}
           </pre>
+        </details>
 
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="mt-7 cursor-pointer rounded-full border border-white/20 bg-white/10 px-6 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-white/20"
-          >
-            Reload
-          </button>
-        </div>
-      </main>
-    )
-  }
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="editorial-cta mt-7 cursor-pointer"
+        >
+          {copy.retry}
+        </button>
+      </div>
+    </main>
+  )
+}
+
+export default function ExperienceErrorBoundary({ children }: { children: ReactNode }) {
+  return (
+    <ExperienceErrorBoundaryImpl renderFallback={(error) => <ExperienceErrorFallback error={error} />}>
+      {children}
+    </ExperienceErrorBoundaryImpl>
+  )
 }
