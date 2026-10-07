@@ -27,12 +27,12 @@ const inter = localFont({
 export const metadata: Metadata = {
   title: "BMW M5 CS — Engineered for the Apex",
   description:
-    "The most powerful BMW 5 Series of all time — 627 hp twin-turbo V8, 70 kg lighter than the M5 Competition, sharpened on the Nürburgring. Scroll through a cinematic 3D studio inspection.",
+    "Explore and configure the BMW M5 CS in a cinematic 3D showroom. Change its finish, wheels, calipers, lighting, and location, then share your build.",
   keywords: ["BMW", "BMW M5 CS", "M5 CS", "M5", "twin-turbo V8", "sport sedan", "3D showcase"],
   openGraph: {
     title: "BMW M5 CS — Engineered for the Apex",
     description:
-      "The most powerful BMW 5 Series of all time — 627 hp twin-turbo V8, sharpened on the Nürburgring. A cinematic scroll-driven 3D inspection.",
+      "A cinematic 3D BMW M5 CS configurator. Choose finishes, explore the car, and share your build.",
     siteName: "BMW M5 CS",
     type: "website",
   },
