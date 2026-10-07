@@ -18,33 +18,33 @@ export const PAINT_CONFIGS: Record<PaintFinish, PaintConfig> = {
     name: 'Frozen Deep Green',
     nameAr: 'أخضر داكن متجمد',
     hex: '#183124',
-    roughness: 0.38,
-    metalness: 0.72,
-    clearcoat: 0.9,
+    roughness: 0.4,
+    metalness: 0.68,
+    clearcoat: 0.82,
   },
   'brands-hatch-grey': {
     name: 'Brands Hatch Grey',
     nameAr: 'رمادي براندز هاتش',
     hex: '#69717a',
-    roughness: 0.34,
-    metalness: 0.82,
-    clearcoat: 1.0,
+    roughness: 0.36,
+    metalness: 0.72,
+    clearcoat: 0.82,
   },
   'frozen-bluestone': {
     name: 'Frozen Bluestone',
     nameAr: 'حجر أزرق متجمد',
     hex: '#3f5060',
-    roughness: 0.36,
-    metalness: 0.8,
-    clearcoat: 0.95,
+    roughness: 0.38,
+    metalness: 0.7,
+    clearcoat: 0.84,
   },
   'sapphire-black': {
     name: 'Black Sapphire',
     nameAr: 'أسود ياقوتي',
     hex: '#0d0f12',
-    roughness: 0.18,
-    metalness: 0.92,
-    clearcoat: 1.0,
+    roughness: 0.24,
+    metalness: 0.78,
+    clearcoat: 0.84,
   },
 }
 
@@ -194,40 +194,23 @@ export type SceneId = 'studio' | 'nurburgring' | 'garage' | 'alpine' | 'tokyo' |
 export interface SceneInfo {
   id: SceneId
   name: string
+  nameAr: string
   tagline: string
+  taglineAr: string
   /** small swatch gradient used in the dock */
   swatch: string
 }
 
 export const SCENES: SceneInfo[] = [
-  { id: 'studio', name: 'Studio', tagline: 'Infinity cove · softbox rig', swatch: 'linear-gradient(135deg,#2a2f3a,#0b0d12)' },
-  { id: 'nurburgring', name: 'Nürburgring', tagline: 'Pit lane · dusk', swatch: 'linear-gradient(180deg,#1a1d45 0%,#d8703e 60%,#2b2b30 61%)' },
-  { id: 'garage', name: 'Munich Garage', tagline: 'Underground · P2', swatch: 'linear-gradient(180deg,#1a1c20,#3a3d44 55%,#6b6d70)' },
-  { id: 'alpine', name: 'Alpine Pass', tagline: 'Golden hour · 2,100 m', swatch: 'linear-gradient(180deg,#4f86c6 0%,#f4d6a4 55%,#4e6070 56%,#3f4a2c)' },
-  { id: 'tokyo', name: 'Tokyo Night', tagline: 'Shuto Expressway · Neon rain', swatch: 'linear-gradient(180deg,#0a051b 0%,#e11d48 45%,#06b6d4 75%,#0f172a 100%)' },
-  { id: 'dubai', name: 'Dubai Desert', tagline: 'Al Qudra Dunes · Sunset', swatch: 'linear-gradient(180deg,#831843 0%,#ea580c 45%,#f59e0b 65%,#3b1807 100%)' },
-  { id: 'monaco', name: 'Monaco Marina', tagline: 'Port Hercule · Grand Prix dusk', swatch: 'linear-gradient(180deg,#0e2238 0%,#1e5b88 45%,#e08c38 65%,#1c222b 100%)' },
-  { id: 'docks', name: 'Cargo Docks', tagline: 'Container terminal · Night mist', swatch: 'linear-gradient(180deg,#050b14 0%,#0ea5e9 40%,#f97316 70%,#1e293b 100%)' },
+  { id: 'studio', name: 'Studio', nameAr: 'الاستوديو', tagline: 'Infinity cove · softbox rig', taglineAr: 'خلفية استوديو وإضاءة ناعمة', swatch: 'linear-gradient(135deg,#242a32,#0b0d12)' },
+  { id: 'nurburgring', name: 'Nürburgring', nameAr: 'نوربورغرينغ', tagline: 'Pit lane · dusk', taglineAr: 'ممر الصيانة · الغسق', swatch: 'linear-gradient(180deg,#1a1d45 0%,#76523f 60%,#2b2b30 61%)' },
+  { id: 'garage', name: 'Munich Garage', nameAr: 'مرآب ميونخ', tagline: 'Underground · P2', taglineAr: 'موقف تحت الأرض · P2', swatch: 'linear-gradient(180deg,#1a1c20,#3a3d44 55%,#6b6d70)' },
+  { id: 'alpine', name: 'Alpine Pass', nameAr: 'الممر الألبي', tagline: 'Golden hour · 2,100 m', taglineAr: 'الساعة الذهبية · 2,100 م', swatch: 'linear-gradient(180deg,#4f86c6 0%,#c3a77d 55%,#4e6070 56%,#3f4a2c)' },
+  { id: 'tokyo', name: 'Tokyo Night', nameAr: 'طوكيو ليلاً', tagline: 'Shuto Expressway · Rain', taglineAr: 'طريق شوتو السريع · أمطار', swatch: 'linear-gradient(180deg,#0a051b 0%,#8c2441 45%,#23586a 75%,#0f172a 100%)' },
+  { id: 'dubai', name: 'Dubai Desert', nameAr: 'صحراء دبي', tagline: 'Al Qudra Dunes · Sunset', taglineAr: 'كثبان القدرة · الغروب', swatch: 'linear-gradient(180deg,#683647 0%,#a35329 45%,#ba7e36 65%,#3b1807 100%)' },
+  { id: 'monaco', name: 'Monaco Marina', nameAr: 'ميناء موناكو', tagline: 'Port Hercule · Dusk', taglineAr: 'ميناء هرقل · الغسق', swatch: 'linear-gradient(180deg,#0e2238 0%,#1e5b88 45%,#9b6b47 65%,#1c222b 100%)' },
+  { id: 'docks', name: 'Cargo Docks', nameAr: 'أرصفة الشحن', tagline: 'Container terminal · Night', taglineAr: 'محطة الحاويات · الليل', swatch: 'linear-gradient(180deg,#050b14 0%,#25627c 40%,#835635 70%,#1e293b 100%)' },
 ]
-
-export function getRandomSceneId(excludeId?: SceneId): SceneId {
-  const pool = excludeId ? SCENES.filter((s) => s.id !== excludeId) : SCENES
-  const list = pool.length > 0 ? pool : SCENES
-  const idx = Math.floor(Math.random() * list.length)
-  return list[idx].id
-}
-
-export function getInitialSceneId(): SceneId {
-  if (typeof window === 'undefined') return 'studio'
-  try {
-    const prev = sessionStorage.getItem('m5cs_active_scene') as SceneId | null
-    const chosen = getRandomSceneId(prev && SCENES.some((s) => s.id === prev) ? prev : undefined)
-    sessionStorage.setItem('m5cs_active_scene', chosen)
-    return chosen
-  } catch {
-    return getRandomSceneId()
-  }
-}
 
 /* ══════════════════════════════════════════════════════════════════════
  * X-Ray technical specification — counted up while the car is scanned
@@ -236,6 +219,7 @@ export function getInitialSceneId(): SceneId {
 export interface SpecStat {
   id: string
   label: string
+  labelAr: string
   value: number
   unit: string
   decimals?: number
@@ -244,12 +228,12 @@ export interface SpecStat {
 }
 
 export const SPEC_STATS: SpecStat[] = [
-  { id: 'power', label: 'Power', value: 627, unit: 'hp', bar: 0.92 },
-  { id: 'torque', label: 'Torque', value: 750, unit: 'Nm', bar: 0.86 },
-  { id: 'sprint', label: '0–100 km/h', value: 3.0, unit: 's', decimals: 1, bar: 0.34 },
-  { id: 'vmax', label: 'Top speed', value: 305, unit: 'km/h', bar: 0.98 },
-  { id: 'weight', label: 'Kerb weight (DIN)', value: 1825, unit: 'kg', bar: 0.58 },
-  { id: 'displacement', label: 'Displacement', value: 4395, unit: 'cc', bar: 0.66 },
+  { id: 'power', label: 'Power', labelAr: 'القوة', value: 627, unit: 'hp', bar: 0.92 },
+  { id: 'torque', label: 'Torque', labelAr: 'عزم الدوران', value: 750, unit: 'Nm', bar: 0.86 },
+  { id: 'sprint', label: '0–100 km/h', labelAr: '0–100 كم/س', value: 3.0, unit: 's', decimals: 1, bar: 0.34 },
+  { id: 'vmax', label: 'Top speed', labelAr: 'السرعة القصوى', value: 305, unit: 'km/h', bar: 0.98 },
+  { id: 'weight', label: 'Kerb weight (DIN)', labelAr: 'الوزن DIN', value: 1825, unit: 'kg', bar: 0.58 },
+  { id: 'displacement', label: 'Displacement', labelAr: 'السعة', value: 4395, unit: 'cc', bar: 0.66 },
 ]
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -261,7 +245,9 @@ export type MMode = 'road' | 'm1' | 'm2'
 export interface CockpitCallout {
   id: string
   label: string
+  labelAr: string
   sublabel: string
+  sublabelAr: string
   /** car-local anchor (nose = +X, driver side = −Z, ground = y 0) */
   localPos: [number, number, number]
 }
@@ -270,12 +256,16 @@ export const COCKPIT_CALLOUTS: CockpitCallout[] = [
   {
     id: 'wheel',
     label: 'M Alcantara Steering Wheel',
+    labelAr: 'مقود M من ألكانتارا',
+    sublabelAr: 'علامة حمراء عند الساعة 12 · مقابض تبديل كربونية',
     sublabel: 'Red 12 o\u2019clock marker · carbon shift paddles',
     localPos: [0.37, 0.93, -0.36],
   },
   {
     id: 'seat',
     label: 'M Carbon Bucket Seats',
+    labelAr: 'مقاعد M من ألياف الكربون',
+    sublabelAr: 'أخفّ بـ10 كغ لكل مقعد · شعار CS مضاء · جلد Merino',
     sublabel: '\u221210 kg each · illuminated CS badge · Merino leather',
     localPos: [0.05, 0.98, 0.36],
   },
