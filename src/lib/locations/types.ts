@@ -61,13 +61,13 @@ export type LocationScene = {
 
 /** The verified studio baseline — re-applied when returning to the studio. */
 export const STUDIO_LIGHTING: LocationLighting = {
-  key: { color: 0xfff1dd, intensity: 380, position: [7, 9, 5] },
-  rim: { color: 0xbfd0e8, intensity: 1.6, position: [-8, 5, -6] },
-  hemi: { sky: 0x39404e, ground: 0x0b0c10, intensity: 0.42 },
-  fog: { color: 0x050608, density: 0.018 },
-  exposure: 1.0,
-  environmentIntensity: 1.0,
-  beamScale: 1.0,
+  key: { color: 0xfff1dd, intensity: 620, position: [7, 9, 5] },
+  rim: { color: 0xbfd0e8, intensity: 2.0, position: [-8, 5, -6] },
+  hemi: { sky: 0xe9eff4, ground: 0x949b9e, intensity: 1.2 },
+  fog: { color: 0xbdc1c3, density: 0 },
+  exposure: 1.1,
+  environmentIntensity: 1.35,
+  beamScale: 0,
   floorReflection: true,
   shadow: { near: 3, far: 30, angle: 0.58, penumbra: 0.65 },
 }

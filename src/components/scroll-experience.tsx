@@ -56,6 +56,7 @@ import CockpitOverlay from '@/components/cockpit-overlay'
 import { useLocale } from '@/components/locale-provider'
 import { getSiteCopy } from '@/lib/site-copy'
 import { detectWebGL } from '@/lib/webgl-support'
+import { createStudioCove, studioPalette } from '@/lib/studio'
 import { randomLocation } from '@/lib/locations/photographic'
 import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/locations'
 
@@ -153,143 +154,6 @@ function makeWheelShadowTexture(): THREE.CanvasTexture {
   g.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 128, 128)
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-
-/** Dark seamless studio vignette used as scene.background */
-function makeStudioBackdropTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 1024
-  const ctx = canvas.getContext('2d')!
-  const g = ctx.createRadialGradient(512, 430, 40, 512, 512, 780)
-  if (theme === 'm') {
-    g.addColorStop(0, '#10162a')
-    g.addColorStop(0.48, '#0b0f1c')
-    g.addColorStop(1, '#03050a')
-  } else if (theme === 'night') {
-    g.addColorStop(0, '#0a1524')
-    g.addColorStop(0.48, '#060c16')
-    g.addColorStop(1, '#020408')
-  } else {
-    g.addColorStop(0, '#202430')
-    g.addColorStop(0.48, '#11131a')
-    g.addColorStop(1, '#050608')
-  }
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, 1024, 1024)
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-
-/** Neutral cyclorama gradient: a quiet background for the car, not a graphic backdrop. */
-function makeCycloramaTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 1024
-  canvas.height = 512
-  const ctx = canvas.getContext('2d')!
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
-
-  gradient.addColorStop(0, '#050609')
-  gradient.addColorStop(0.52, theme === 'night' ? '#090e14' : '#0b0e12')
-  gradient.addColorStop(0.82, theme === 'm' ? '#121821' : theme === 'night' ? '#10151c' : '#17191b')
-  gradient.addColorStop(1, '#0c0e11')
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-
-/** Subtle, seamless concrete grain for the studio floor. */
-function makeStudioFloorTextures(): { color: THREE.CanvasTexture; roughness: THREE.CanvasTexture } {
-  const size = 256
-  const colorCanvas = document.createElement('canvas')
-  const roughnessCanvas = document.createElement('canvas')
-  colorCanvas.width = colorCanvas.height = size
-  roughnessCanvas.width = roughnessCanvas.height = size
-  const colorCtx = colorCanvas.getContext('2d')!
-  const roughnessCtx = roughnessCanvas.getContext('2d')!
-  const colorData = colorCtx.createImageData(size, size)
-  const roughnessData = roughnessCtx.createImageData(size, size)
-  let seed = 0x4d354353
-  const random = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-    return seed / 0x100000000
-  }
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4
-      const broadGrain = (Math.sin(x * 0.035) + Math.sin(y * 0.029) + Math.sin((x + y) * 0.018)) * 1.1
-      const grain = (random() - 0.5) * 5 + broadGrain
-      colorData.data[i] = Math.max(0, 23 + grain)
-      colorData.data[i + 1] = Math.max(0, 25 + grain)
-      colorData.data[i + 2] = Math.max(0, 29 + grain)
-      colorData.data[i + 3] = 255
-
-      const roughness = 226 + (random() - 0.5) * 26 + Math.abs(broadGrain) * 2
-      roughnessData.data[i] = roughness
-      roughnessData.data[i + 1] = roughness
-      roughnessData.data[i + 2] = roughness
-      roughnessData.data[i + 3] = 255
-    }
-  }
-
-  colorCtx.putImageData(colorData, 0, 0)
-  roughnessCtx.putImageData(roughnessData, 0, 0)
-
-  const color = new THREE.CanvasTexture(colorCanvas)
-  color.colorSpace = THREE.SRGBColorSpace
-  color.wrapS = color.wrapT = THREE.RepeatWrapping
-  color.repeat.set(18, 18)
-
-  const roughness = new THREE.CanvasTexture(roughnessCanvas)
-  roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping
-  roughness.repeat.set(18, 18)
-  return { color, roughness }
-}
-
-/** Forward laserlight beam projection cast on floor */
-function makeHeadlightProjectionTexture(theme: StudioTheme = 'apex'): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')!
-  const g = ctx.createRadialGradient(80, 128, 10, 260, 128, 240)
-  const col =
-    theme === 'night'
-      ? '160, 215, 255'
-      : theme === 'm'
-      ? '0, 170, 255'
-      : '255, 235, 195'
-  g.addColorStop(0, `rgba(${col}, 0.65)`)
-  g.addColorStop(0.35, `rgba(${col}, 0.25)`)
-  g.addColorStop(0.7, `rgba(${col}, 0.06)`)
-  g.addColorStop(1, `rgba(${col}, 0)`)
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, 512, 256)
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-
-/** Rear diffuser crimson glow pool cast on floor */
-function makeTaillightProjectionTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')!
-  const g = ctx.createRadialGradient(432, 128, 10, 252, 128, 240)
-  g.addColorStop(0, 'rgba(235, 20, 40, 0.55)')
-  g.addColorStop(0.38, 'rgba(200, 15, 30, 0.22)')
-  g.addColorStop(0.75, 'rgba(140, 10, 20, 0.05)')
-  g.addColorStop(1, 'rgba(80, 0, 10, 0)')
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, 512, 256)
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -1048,14 +912,14 @@ export default function ScrollExperience() {
     renderer.shadowMap.autoUpdate = false
     renderer.shadowMap.type = THREE.PCFShadowMap
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 0.95
+    renderer.toneMappingExposure = STUDIO_LIGHTING.exposure
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
     /* ── Scene: local studio environment with a procedural fallback ──── */
     const scene = new THREE.Scene()
-    const backdropTex = makeStudioBackdropTexture()
-    scene.background = backdropTex
-    scene.fog = new THREE.FogExp2(0x050608, 0.018) // thin enough for the cyclorama to read, thick enough to hide the floor rim
+    const backdropColor = new THREE.Color(studioPalette(theme).background)
+    scene.background = backdropColor
+    scene.fog = new THREE.FogExp2(0xbdc1c3, 0) // thin enough for the cyclorama to read, thick enough to hide the floor rim
 
     // A small, locally hosted studio panorama gives the paint and glass
     // recognizable photographic reflections. Keep a procedural fallback for
@@ -1065,6 +929,7 @@ export default function ScrollExperience() {
     const envTex = pmrem.fromScene(room, 0.04).texture
     let studioEnvTarget: THREE.WebGLRenderTarget | null = null
     scene.environment = envTex
+    scene.environmentIntensity = STUDIO_LIGHTING.environmentIntensity
     ;(room as unknown as { dispose?: () => void }).dispose?.()
     new THREE.TextureLoader().load(
       '/textures/studio_360.jpg',
@@ -1096,7 +961,7 @@ export default function ScrollExperience() {
     /* ── Camera and restrained studio light rig ─────────────────────── */
     const camera = new THREE.PerspectiveCamera(FOV_DESKTOP, window.innerWidth / window.innerHeight, 0.1, 160)
 
-    const key = new THREE.SpotLight(0xfff2e4, 190)
+    const key = new THREE.SpotLight(STUDIO_LIGHTING.key.color, STUDIO_LIGHTING.key.intensity)
     key.position.set(7, 9, 5)
     key.angle = 0.58
     key.penumbra = 0.65
@@ -1112,92 +977,29 @@ export default function ScrollExperience() {
     key.target.position.set(0, 0.5, 0)
     scene.add(key, key.target)
 
-    const rim = new THREE.DirectionalLight(0xc5d0dd, 1.15)
+    const rim = new THREE.DirectionalLight(STUDIO_LIGHTING.rim.color, STUDIO_LIGHTING.rim.intensity)
     rim.position.set(-8, 5, -6)
     scene.add(rim)
 
-    const hemi = new THREE.HemisphereLight(0x4a5260, 0x101216, 0.48)
+    const hemi = new THREE.HemisphereLight(STUDIO_LIGHTING.hemi.sky, STUDIO_LIGHTING.hemi.ground, STUDIO_LIGHTING.hemi.intensity)
     scene.add(hemi)
 
     /* The studio keeps only the surfaces needed to shape clean reflections. */
     const studio = new THREE.Group()
     scene.add(studio)
 
-    const canopy = new THREE.Group()
-    canopy.position.y = 5.4
-    studio.add(canopy)
-    const diffuserMat = new THREE.MeshBasicMaterial({ color: 0xf2f1ec, side: THREE.DoubleSide })
-    for (const [z, width] of [[0, 2.0], [-2.6, 0.75], [2.6, 0.75]] as const) {
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(14, width), diffuserMat)
-      panel.rotation.x = Math.PI / 2
-      panel.position.z = z
-      canopy.add(panel)
-    }
-
-    /* ── Cyclorama — neutral, continuous studio backdrop ─────────────── */
-    const cyclorama = new THREE.Mesh(
-      new THREE.CylinderGeometry(46, 46, 24, 72, 1, true),
-      new THREE.MeshBasicMaterial({ map: makeCycloramaTexture('apex'), side: THREE.BackSide }),
-    )
-    cyclorama.position.y = 12
-    studio.add(cyclorama)
-
-    /* ── Studio floor: dark sealed concrete, not a decorative calibration grid ── */
-    const floorTextures = makeStudioFloorTextures()
-    floorTextures.color.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
-    floorTextures.roughness.anisotropy = floorTextures.color.anisotropy
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(90, 96),
-      new THREE.MeshStandardMaterial({
-        map: floorTextures.color,
-        roughnessMap: floorTextures.roughness,
-        roughness: 0.78,
-        metalness: 0.08,
-        envMapIntensity: 0.2,
-      }),
-    )
-    floor.rotation.x = -Math.PI / 2
-    floor.receiveShadow = true
-    studio.add(floor)
+    const studioMaterial = new THREE.MeshStandardMaterial({
+      color: studioPalette(theme).surface, roughness: 0.76, metalness: 0,
+      envMapIntensity: 0.3, side: THREE.DoubleSide,
+    })
+    const studioCove = new THREE.Mesh(createStudioCove(), studioMaterial)
+    studioCove.receiveShadow = true
+    studio.add(studioCove)
 
     /* ── Car root + contact shadows + dynamic automotive projections ─ */
     const carGroup = new THREE.Group()
     carGroup.rotation.y = BASE_YAW
     scene.add(carGroup)
-
-    // Forward Laserlight floor beam projection
-    const headlightTex = makeHeadlightProjectionTexture('apex')
-    const headlightBeam = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.5, 4.4),
-      new THREE.MeshBasicMaterial({
-        map: headlightTex,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: 0.82,
-      }),
-    )
-    headlightBeam.rotation.x = -Math.PI / 2
-    headlightBeam.position.set(4.6, 0.014, 0)
-    headlightBeam.renderOrder = 2
-    carGroup.add(headlightBeam)
-
-    // Rear diffuser crimson glow pool
-    const taillightTex = makeTaillightProjectionTexture()
-    const taillightBeam = new THREE.Mesh(
-      new THREE.PlaneGeometry(6.2, 3.8),
-      new THREE.MeshBasicMaterial({
-        map: taillightTex,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: 0.72,
-      }),
-    )
-    taillightBeam.rotation.x = -Math.PI / 2
-    taillightBeam.position.set(-4.2, 0.014, 0)
-    taillightBeam.renderOrder = 2
-    carGroup.add(taillightBeam)
 
     // Body AO contact shadow
     const contactTex = makeContactShadowTexture()
@@ -1211,55 +1013,23 @@ export default function ScrollExperience() {
     carGroup.add(contact)
 
     /* ── Real-Time Theme Transition Handler ────────────────────────── */
-    let currentTheme: StudioTheme = 'apex'
+    let currentTheme: StudioTheme = theme
     let currentHighBeams = true
     let activeLocation: LocationScene | null = null
-    let studioBackdrop: THREE.Texture = backdropTex
+    const studioBackdrop = backdropColor
     const applyTheme = (t: StudioTheme, hb: boolean) => {
       currentTheme = t
       currentHighBeams = hb
-      studioBackdrop.dispose()
-      const newBackdrop = makeStudioBackdropTexture(t)
-      studioBackdrop = newBackdrop
-      if (!activeLocation) scene.background = newBackdrop
-
-      const curCyMap = (cyclorama.material as THREE.MeshBasicMaterial).map
-      curCyMap?.dispose()
-      ;(cyclorama.material as THREE.MeshBasicMaterial).map = makeCycloramaTexture(t)
-      ;(cyclorama.material as THREE.MeshBasicMaterial).needsUpdate = true
-
-      if (t === 'm') {
-        diffuserMat.color.setHex(0xe4ebf4)
-      } else if (t === 'night') {
-        diffuserMat.color.setHex(0xdbe3eb)
-      } else {
-        diffuserMat.color.setHex(0xf2f1ec)
-      }
+      const palette = studioPalette(t)
+      studioMaterial.color.set(palette.surface)
+      studioBackdrop.set(palette.background)
       if (!activeLocation) {
-        if (t === 'm') {
-          key.color.setHex(0xeaf5ff)
-          rim.color.setHex(0x009ada)
-        } else if (t === 'night') {
-          key.color.setHex(0xd0e6ff)
-          rim.color.setHex(0x2860a8)
-        } else {
-          key.color.setHex(0xfff1dd)
-          rim.color.setHex(0xbfd0e8)
-        }
+        scene.background = studioBackdrop
+        key.color.setHex(STUDIO_LIGHTING.key.color)
+        rim.color.setHex(STUDIO_LIGHTING.rim.color)
       }
-
-      headlightBeam.material.map?.dispose()
-      headlightBeam.material.map = makeHeadlightProjectionTexture(t)
-      headlightBeam.material.needsUpdate = true
-      applyBeams()
     }
     updateThemeRef.current = applyTheme
-
-    const applyBeams = () => {
-      const scale = activeLocation ? activeLocation.lighting.beamScale : 1
-      headlightBeam.material.opacity = (currentHighBeams ? 0.85 : 0.15) * scale
-      taillightBeam.material.opacity = (currentHighBeams ? 0.75 : 0.15) * scale
-    }
 
     /* ── Location switcher ─────────────────────────────────────────────
      * The car, its contact shadows and the shared 3-light rig stay; the
@@ -1420,7 +1190,6 @@ export default function ScrollExperience() {
         old.dispose()
         locationCache.delete(oldest)
       }
-      applyBeams()
       if (!instant) {
         gsap.fromTo(canvas, { opacity: 0.85 }, { opacity: 1, duration: 0.3, ease: 'power2.out' })
       }
@@ -1997,9 +1766,6 @@ export default function ScrollExperience() {
         scene.remove(activeLocation.group)
         activeLocation = null
       }
-      studioBackdrop.dispose()
-      floorTextures.color.dispose()
-      floorTextures.roughness.dispose()
       studioEnvTarget?.dispose()
       studioEnvTarget = null
       envTex.dispose()
@@ -2243,12 +2009,12 @@ export default function ScrollExperience() {
           aria-describedby="booking-description"
           tabIndex={-1}
           ref={bookingDialogRef}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-4 animate-in fade-in duration-200"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 animate-in fade-in duration-200"
           onClick={(event) => {
             if (event.target === event.currentTarget) setShowBookingModal(false)
           }}
         >
-          <div className="relative w-full max-w-[520px] rounded-md border border-white/15 bg-[#0c0f16] p-6 shadow-2xl sm:p-8">
+          <div className="details-glass relative w-full max-w-[520px] rounded-2xl border border-white/20 p-6 shadow-2xl sm:p-8">
             <button
               type="button"
               onClick={() => setShowBookingModal(false)}
