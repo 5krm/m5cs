@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
   // (node .next/standalone/server.js). Vercel's Next.js adapter runs its own output file
   // tracing and expects the default `.next` layout, and the Vercel build system sets
   // VERCEL=1 for us — so only emit a standalone bundle when NOT building on Vercel.
-  output: process.env.VERCEL ? undefined : "standalone",
+  output: "export",
+  images: { unoptimized: true },
   allowedDevOrigins: [
     "ais-dev-b5k63p664bk27z5zcecwww-146330742784.europe-west1.run.app",
     "ais-pre-b5k63p664bk27z5zcecwww-146330742784.europe-west1.run.app",

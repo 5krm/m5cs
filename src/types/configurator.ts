@@ -202,14 +202,10 @@ export interface SceneInfo {
 }
 
 export const SCENES: SceneInfo[] = [
-  { id: 'studio', name: 'Studio', nameAr: 'الاستوديو', tagline: 'Infinity cove · softbox rig', taglineAr: 'خلفية استوديو وإضاءة ناعمة', swatch: 'linear-gradient(135deg,#242a32,#0b0d12)' },
-  { id: 'nurburgring', name: 'Nürburgring', nameAr: 'نوربورغرينغ', tagline: 'Pit lane · dusk', taglineAr: 'ممر الصيانة · الغسق', swatch: 'linear-gradient(180deg,#1a1d45 0%,#76523f 60%,#2b2b30 61%)' },
-  { id: 'garage', name: 'Munich Garage', nameAr: 'مرآب ميونخ', tagline: 'Underground · P2', taglineAr: 'موقف تحت الأرض · P2', swatch: 'linear-gradient(180deg,#1a1c20,#3a3d44 55%,#6b6d70)' },
-  { id: 'alpine', name: 'Alpine Pass', nameAr: 'الممر الألبي', tagline: 'Golden hour · 2,100 m', taglineAr: 'الساعة الذهبية · 2,100 م', swatch: 'linear-gradient(180deg,#4f86c6 0%,#c3a77d 55%,#4e6070 56%,#3f4a2c)' },
-  { id: 'tokyo', name: 'Tokyo Night', nameAr: 'طوكيو ليلاً', tagline: 'Shuto Expressway · Rain', taglineAr: 'طريق شوتو السريع · أمطار', swatch: 'linear-gradient(180deg,#0a051b 0%,#8c2441 45%,#23586a 75%,#0f172a 100%)' },
-  { id: 'dubai', name: 'Dubai Desert', nameAr: 'صحراء دبي', tagline: 'Al Qudra Dunes · Sunset', taglineAr: 'كثبان القدرة · الغروب', swatch: 'linear-gradient(180deg,#683647 0%,#a35329 45%,#ba7e36 65%,#3b1807 100%)' },
-  { id: 'monaco', name: 'Monaco Marina', nameAr: 'ميناء موناكو', tagline: 'Port Hercule · Dusk', taglineAr: 'ميناء هرقل · الغسق', swatch: 'linear-gradient(180deg,#0e2238 0%,#1e5b88 45%,#9b6b47 65%,#1c222b 100%)' },
-  { id: 'docks', name: 'Cargo Docks', nameAr: 'أرصفة الشحن', tagline: 'Container terminal · Night', taglineAr: 'محطة الحاويات · الليل', swatch: 'linear-gradient(180deg,#050b14 0%,#25627c 40%,#835635 70%,#1e293b 100%)' },
+  { id: 'studio', name: 'Studio', nameAr: 'الاستوديو', tagline: 'Clean backdrop', taglineAr: 'خلفية هادئة', swatch: 'linear-gradient(135deg,#242a32,#0b0d12)' },
+  { id: 'alpine', name: 'Mountain road', nameAr: 'طريق جبلي', tagline: 'Real 360° photograph', taglineAr: 'صورة واقعية بزاوية 360°', swatch: 'linear-gradient(180deg,#729ab4,#e7cbac,#4c555b)' },
+  { id: 'garage', name: 'City parking', nameAr: 'موقف المدينة', tagline: 'Morning light', taglineAr: 'ضوء الصباح', swatch: 'linear-gradient(180deg,#85b4d6,#d6d5c8,#6b7070)' },
+  { id: 'monaco', name: 'Sunset avenue', nameAr: 'شارع الغروب', tagline: 'Warm evening light', taglineAr: 'إضاءة المساء الدافئة', swatch: 'linear-gradient(180deg,#7e99b0,#e7ba8e,#626d67)' },
 ]
 
 /* ══════════════════════════════════════════════════════════════════════

@@ -6,12 +6,12 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "next dev -p 3000 -H 0.0.0.0",
+    "dev": "node scripts/sites-preview.mjs",
     "build": "next build && node scripts/postbuild.mjs",
-    "start": "NODE_ENV=production node .next/standalone/server.js",
+    "start": "node scripts/serve-static.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "audit:prod": "npm audit --omit=dev",
     "check": "npm run lint && npm run typecheck && npm run test && npm run audit:prod && npm run build",
     "db:push": "prisma db push --accept-data-loss",

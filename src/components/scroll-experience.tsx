@@ -56,6 +56,7 @@ import CockpitOverlay from '@/components/cockpit-overlay'
 import { useLocale } from '@/components/locale-provider'
 import { getSiteCopy } from '@/lib/site-copy'
 import { detectWebGL } from '@/lib/webgl-support'
+import { randomLocation } from '@/lib/locations/photographic'
 import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/locations'
 
 export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
@@ -322,7 +323,6 @@ type CarRig = {
   setPaintColor: (paint: PaintFinish) => void
   /** 0 = normal paint, 1 = full wireframe X-ray (body shell fades to a
    *  translucent blue-print, drivetrain + chassis stay lit) */
-  setXray: (amount: number) => void
   /** cockpit mode: hides the body shell / glass that would sit between the
    *  driver's-eye camera and the interior, and paints the cluster red */
   setCockpit: (active: boolean, mode: MMode) => void
@@ -535,91 +535,8 @@ function buildCarRig(
   })
   junk.forEach((m) => (m.visible = false))
 
-  /* ── X-ray: body shell → translucent wire "blueprint" ─────────────── */
-  const xrayWire = new THREE.MeshBasicMaterial({
-    color: 0x7fd3ff,
-    wireframe: true,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    fog: false,
-  })
-  const xrayGhost = new THREE.MeshBasicMaterial({
-    color: 0x1f6fa8,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-    fog: false,
-  })
-  const keepEmissive = new THREE.Color(0xff7a2a)
-  const keepMats = new Set<THREE.MeshStandardMaterial>()
-  const originalEmissive = new Map<THREE.MeshStandardMaterial, { c: THREE.Color; i: number }>()
-  for (const { mesh, kind } of allMeshes) {
-    if (kind !== 'keep') continue
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    for (const m of mats) {
-      const std = m as THREE.MeshStandardMaterial
-      if (!std.isMeshStandardMaterial) continue
-      if (!keepMats.has(std)) {
-        keepMats.add(std)
-        originalEmissive.set(std, { c: std.emissive.clone(), i: std.emissiveIntensity })
-      }
-    }
-  }
-  const shellOriginal = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>()
-  /** shell meshes get a second, wireframe copy drawn over the (fading) paint */
-  const wireClones: THREE.Mesh[] = []
-  for (const { mesh, kind } of allMeshes) {
-    if (kind !== 'shell' && kind !== 'glass') continue
-    shellOriginal.set(mesh, mesh.material)
-    const clone = new THREE.Mesh(mesh.geometry, xrayWire)
-    clone.visible = false
-    clone.renderOrder = 5
-    clone.castShadow = false
-    clone.frustumCulled = mesh.frustumCulled
-    mesh.add(clone) // inherits the exact transform
-    wireClones.push(clone)
-  }
-  let xrayLevel = 0
+  // Keep the painted body intact in every camera view.
   let cockpitActive = false
-  const setXray = (amount: number) => {
-    const a = Math.min(1, Math.max(0, amount))
-    if (Math.abs(a - xrayLevel) < 0.002) return
-    xrayLevel = a
-    const on = a > 0.001
-    xrayWire.opacity = 0.42 * a
-    xrayGhost.opacity = 0.08 * a
-    for (const clone of wireClones) clone.visible = on
-    for (const { mesh, kind } of allMeshes) {
-      if (kind === 'shell' || kind === 'glass') {
-        if (cockpitActive) continue
-        // paint fades out over the first 60 % of the scan, wire fades in
-        const orig = shellOriginal.get(mesh)!
-        if (a > 0.6) {
-          mesh.material = xrayGhost
-          mesh.castShadow = false
-        } else {
-          mesh.material = orig
-          mesh.castShadow = true
-          const mats = Array.isArray(orig) ? orig : [orig]
-          for (const m of mats) {
-            m.transparent = a > 0
-            m.opacity = 1 - a / 0.6
-            m.depthWrite = a === 0
-            m.needsUpdate = false
-          }
-        }
-      }
-    }
-    for (const std of keepMats) {
-      const o = originalEmissive.get(std)!
-      std.emissive.copy(o.c).lerp(keepEmissive, a)
-      std.emissiveIntensity = o.i + a * 0.55
-    }
-  }
 
   /* ── Cockpit: hide the shell so the camera can sit inside ─────────── */
   const clusterMats = new Set<THREE.MeshStandardMaterial>()
@@ -711,7 +628,6 @@ function buildCarRig(
     setWheelFinish,
     setCaliperColor,
     setPaintColor,
-    setXray,
     setCockpit,
     cockpitEye,
   }
@@ -793,7 +709,6 @@ const NAV_ITEMS = [
   { id: 'performance', labelKey: 'performance' },
   { id: 'design', labelKey: 'design' },
   { id: 'xray', labelKey: 'engineering' },
-  { id: 'specs', labelKey: 'specifications' },
 ] as const
 
 /* ── Scroll-progress map (must match buildTimeline below) ─────────────── */
@@ -808,7 +723,7 @@ const P = {
   outroIn: 1.0,
 } as const
 
-type SectionId = (typeof NAV_ITEMS)[number]['id']
+type SectionId = (typeof NAV_ITEMS)[number]['id'] | 'specs'
 
 async function readModelResponse(
   response: Response,
@@ -836,8 +751,11 @@ export default function ScrollExperience() {
   const endCardRef = useRef<HTMLDivElement>(null)
   const xrayProgressRef = useRef(0)
 
+  const [locationBusy, setLocationBusy] = useState(false)
   const [buildConfiguration, setBuildConfiguration] = useState<BuildConfiguration>(() =>
-    getInitialBuildConfiguration(),
+    ({ ...getInitialBuildConfiguration(), highBeams: false,
+      sceneId: typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('scene')
+        ? getInitialBuildConfiguration().sceneId : randomLocation() }),
   )
   const { theme, highBeams, paint, wheelFinish, caliperColor, sceneId } = buildConfiguration
   const [hoodOpen, setHoodOpen] = useState(false)
@@ -854,9 +772,7 @@ export default function ScrollExperience() {
     progress: 0,
   })
   const initialSceneRef = useRef<SceneId>(sceneId)
-  const lastRenderedXrayProgressRef = useRef(-1)
   const [cockpitMode, setCockpitMode] = useState(false)
-  const [xrayValues, setXrayValues] = useState<number[]>(() => SPEC_STATS.map(() => 0))
   /** Set when the 3D stage cannot start (no WebGL, or init threw). Renders a
    *  readable fallback instead of letting the error unmount the whole app.
    *
@@ -887,6 +803,10 @@ export default function ScrollExperience() {
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 })
 
   const scrollToSection = useCallback((section: SectionId) => {
+    setOrbitMode(false)
+    toggleOrbitRef.current?.(false)
+    setCockpitMode(false)
+    toggleCockpitRef.current?.(false, 'road')
     const track = trackRef.current
     if (!track) return
     const maxScroll = track.offsetHeight - window.innerHeight
@@ -898,7 +818,7 @@ export default function ScrollExperience() {
     else if (section === 'specs') target = maxScroll * 0.85
 
     if (lenisInstanceRef.current) {
-      lenisInstanceRef.current.scrollTo(target, { duration: 1.2 })
+      lenisInstanceRef.current.scrollTo(target, { duration: 0.65 })
     } else {
       window.scrollTo({ top: target, behavior: 'smooth' })
     }
@@ -1019,7 +939,6 @@ export default function ScrollExperience() {
   }, [])
 
   const handleSceneChange = useCallback((id: SceneId) => {
-    setBuildConfiguration((current) => ({ ...current, sceneId: id }))
     setSceneRef.current?.(id)
   }, [])
 
@@ -1064,24 +983,6 @@ export default function ScrollExperience() {
       return next
     })
   }, [])
-
-  const updateXrayReadout = (progress: number) => {
-    const previous = lastRenderedXrayProgressRef.current
-    if (progress > 0.001 && progress < 0.999 && Math.abs(progress - previous) < 0.04) return
-    if (progress <= 0.001 && previous <= 0.001) return
-    if (progress >= 0.999 && previous >= 0.999) return
-
-    lastRenderedXrayProgressRef.current = progress
-    setXrayValues(
-      SPEC_STATS.map((stat, index) => {
-        const start = index * 0.08
-        const t = Math.min(1, Math.max(0, (progress - start) / (1 - start)))
-        if (t >= 0.9) return stat.value
-        const eased = 1 - Math.pow(1 - t, 3)
-        return stat.value * eased
-      }),
-    )
-  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -1434,17 +1335,14 @@ export default function ScrollExperience() {
      * means paint, glass and water reflect the place the car is parked in
      * instead of the neutral studio probe — the cheapest "this is a real
      * location" trick in the whole project. */
+    const locationCache = new Map<SceneId, LocationScene>()
+    const reflectionCache = new Map<LocationScene, THREE.WebGLRenderTarget>()
     let locationEnv: THREE.WebGLRenderTarget | null = null
     const applyEnvironment = (next: LocationScene | null) => {
-      if (locationEnv) {
-        // the whole target goes, not just its texture — a bare texture dispose
-        // leaves the render target behind on every location switch
-        locationEnv.dispose()
-        locationEnv = null
-      }
       if (next?.environment) {
         try {
-          locationEnv = pmrem.fromEquirectangular(next.environment as THREE.Texture)
+          locationEnv = reflectionCache.get(next) ?? pmrem.fromEquirectangular(next.environment as THREE.Texture)
+          reflectionCache.set(next, locationEnv)
           scene.environment = locationEnv.texture
         } catch {
           scene.environment = studioEnvTarget?.texture ?? envTex
@@ -1462,6 +1360,7 @@ export default function ScrollExperience() {
       const requestId = ++locationRequestSequence
       requestedLocationId = id
       if ((activeLocation?.id ?? 'studio') === id) {
+        setLocationBusy(false)
         requestedLocationId = null
         return
       }
@@ -1469,10 +1368,17 @@ export default function ScrollExperience() {
       const mobile = window.innerWidth < 768
       let next: LocationScene | null = null
       try {
-        next = await buildLocationScene(id, { mobile })
+        setLocationBusy(true)
+        // Allow the loading indicator to paint before procedural work begins.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+        if (disposed || requestId !== locationRequestSequence) return
+        next = locationCache.get(id) ?? await buildLocationScene(id, { mobile })
+        if (next && !locationCache.has(id)) await renderer.compileAsync(next.group, camera, scene)
       } catch (err) {
+        if (next && !locationCache.has(id)) next.dispose()
         if (disposed || requestId !== locationRequestSequence) return
         requestedLocationId = null
+        setLocationBusy(false)
         const fallbackId = activeLocation?.id ?? 'studio'
         setBuildConfiguration((current) => ({ ...current, sceneId: fallbackId }))
         console.warn('[scroll-experience] location build failed; keeping the current environment:', err)
@@ -1480,14 +1386,16 @@ export default function ScrollExperience() {
       }
 
       if (disposed || requestId !== locationRequestSequence) {
-        next?.dispose()
+        if (next && !locationCache.has(id)) next.dispose()
         return
       }
       requestedLocationId = null
+      setLocationBusy(false)
+      setBuildConfiguration((current) => ({ ...current, sceneId: id }))
+      if (next) { locationCache.delete(id); locationCache.set(id, next) }
 
       if (activeLocation) {
         scene.remove(activeLocation.group)
-        activeLocation.dispose()
         activeLocation = null
       }
       activeLocation = next
@@ -1503,9 +1411,18 @@ export default function ScrollExperience() {
         applyLighting(STUDIO_LIGHTING, instant)
         applyTheme(currentTheme, currentHighBeams)
       }
+      // Keep at most two locations, including their baked reflections.
+      while (locationCache.size > 2) {
+        const oldest = locationCache.keys().next().value!
+        const old = locationCache.get(oldest)!
+        reflectionCache.get(old)?.dispose()
+        reflectionCache.delete(old)
+        old.dispose()
+        locationCache.delete(oldest)
+      }
       applyBeams()
       if (!instant) {
-        gsap.fromTo(canvas, { opacity: 0.15 }, { opacity: 1, duration: 0.7, ease: 'power2.out' })
+        gsap.fromTo(canvas, { opacity: 0.85 }, { opacity: 1, duration: 0.3, ease: 'power2.out' })
       }
     }
     setSceneRef.current = (id: SceneId) => setLocation(id, false)
@@ -1648,7 +1565,6 @@ export default function ScrollExperience() {
           carGroup.add(patch)
         }
 
-        carRig.setXray(xrayProgressRef.current)
         if (cockpitState.active) carRig.setCockpit(true, cockpitState.mode)
         renderer.shadowMap.needsUpdate = true
         setModelStatus({ phase: 'ready', progress: 1 })
@@ -1892,9 +1808,8 @@ export default function ScrollExperience() {
               activeSectionRef.current = nextSection
               setActiveSection(nextSection)
             }
-            const xrayProgress = xrayAmount(p)
+            const xrayProgress = 0
             xrayProgressRef.current = xrayProgress
-            updateXrayReadout(xrayProgress)
           },
         },
       })
@@ -1973,13 +1888,12 @@ export default function ScrollExperience() {
       })
 
       // The X-ray reveal and the specification readout share the scroll clock.
-      const xa = cockpitState.active ? 0 : xrayProgressRef.current
+      const xa = 0
       const nextShadowMode = xa <= 0.6
       if (nextShadowMode !== xrayShadowMode) {
         xrayShadowMode = nextShadowMode
         renderer.shadowMap.needsUpdate = true
       }
-      carRig?.setXray(xa)
 
       // Cockpit call-outs: project car-local anchors to CSS pixels. Only
       // the ones in front of the camera and inside the frame are shown.
@@ -2044,6 +1958,12 @@ export default function ScrollExperience() {
     /* ── Teardown — no memory leaks ────────────────────────────────── */
     return () => {
       disposed = true
+      if (activeLocation) scene.remove(activeLocation.group)
+      for (const location of locationCache.values()) location.dispose()
+      for (const reflection of reflectionCache.values()) reflection.dispose()
+      locationCache.clear()
+      reflectionCache.clear()
+      locationEnv = null
       locationRequestSequence += 1
       requestedLocationId = null
       modelRequestController?.abort()
@@ -2075,12 +1995,7 @@ export default function ScrollExperience() {
       cockpitTween?.kill()
       if (activeLocation) {
         scene.remove(activeLocation.group)
-        activeLocation.dispose()
         activeLocation = null
-      }
-      if (locationEnv) {
-        locationEnv.dispose()
-        locationEnv = null
       }
       studioBackdrop.dispose()
       floorTextures.color.dispose()
@@ -2182,7 +2097,7 @@ export default function ScrollExperience() {
         Invisible scroll track — its height (560vh) is the scroll distance
         ScrollTrigger scrubs the camera timeline through. Fully reversible.
       */}
-      <div ref={trackRef} aria-hidden="true" className="h-[560vh]" />
+      <div ref={trackRef} aria-hidden="true" className="h-[360vh]" />
 
       {/* Fixed 3D stage */}
       <canvas
@@ -2228,6 +2143,7 @@ export default function ScrollExperience() {
         </div>
       )}
 
+      {locationBusy && <div role="status" className="location-status">{isArabic ? 'جارٍ تجهيز الموقع…' : 'Preparing location…'}</div>}
       {/* Fixed UI overlay */}
       <div className="pointer-events-none fixed inset-0 z-10">
         <header className="site-header pointer-events-auto fixed inset-x-0 top-0 z-30 flex items-center justify-between px-[clamp(20px,5vw,64px)] py-3">
@@ -2241,18 +2157,19 @@ export default function ScrollExperience() {
             <span className="text-[15px] font-semibold tracking-[0.08em] text-white">M5 CS</span>
           </button>
 
-          <nav aria-label={copy.navigationLabel} className="hidden items-center gap-7 md:flex">
+          <nav aria-label={copy.navigationLabel} className="camera-navigation">
             {NAV_ITEMS.map((item) => {
-              const isActive = activeSection === item.id
+              const isActive = (activeSection === 'specs' ? 'xray' : activeSection) === item.id
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => scrollToSection(item.id)}
                   aria-current={isActive ? 'page' : undefined}
+                  aria-pressed={isActive}
                   className="site-nav-link cursor-pointer text-[12px] font-medium"
                 >
-                  {copy.navigation[item.labelKey]}
+                  {isArabic ? ({overview:'كامل',performance:'أمام',design:'خلف',xray:'جانب'}[item.id]) : ({overview:'Overview',performance:'Front',design:'Rear',xray:'Side'}[item.id])}
                 </button>
               )
             })}
@@ -2273,167 +2190,17 @@ export default function ScrollExperience() {
               onClick={() => setShowBookingModal(true)}
               className="border-b border-white/50 px-1 py-1.5 text-[12px] font-medium text-white/85 transition-colors hover:border-white hover:text-white"
             >
-              {copy.driveInformation}
+              {isArabic ? 'التفاصيل' : 'Details'}
             </button>
           </div>
         </header>
 
-        {/* Hero copy */}
-        <div
-          ref={heroLayerRef}
-          data-scroll-copy=""
-          className={`absolute inset-0 flex flex-col justify-end transition-opacity duration-300 ${
-            orbitMode || cockpitMode ? 'pointer-events-none opacity-0' : ''
-          }`}
-        >
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-[62%] bg-gradient-to-t from-[#090b0e]/75 via-[#090b0e]/20 to-transparent" />
-          <section className="relative mb-[112px] flex w-full max-w-[540px] flex-col items-start px-[clamp(22px,7vw,96px)] text-start sm:mb-[112px]">
-            <p className="stage-eyebrow m-0">{copy.heroEyebrow}</p>
-            <h1 className="m-0 mt-3 text-[clamp(36px,6.1vw,70px)] font-semibold leading-[0.98] tracking-[-0.04em] text-white">
-              {copy.heroTitle}
-            </h1>
-            <p className="m-0 mt-4 max-w-[440px] text-[14px] leading-[1.75] text-white/70 sm:text-[15px]">
-              {copy.heroDescription}
-            </p>
-            <div className="mt-5 flex flex-wrap items-center gap-3 text-[11px] font-medium text-white/80">
-              {copy.heroSpecs.map((fact, index) => (
-                <span key={fact} className={index === 0 ? '' : 'border-s border-white/25 ps-3'}>
-                  {fact}
-                </span>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => scrollToSection('performance')}
-              className="editorial-cta pointer-events-auto mt-6 cursor-pointer"
-            >
-              <span>{copy.heroAction}</span>
-              <svg className="directional-arrow" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 12h15" />
-                <path d="M13.5 5.5 20 12l-6.5 6.5" />
-              </svg>
-            </button>
-            <a
-              href="https://sketchfab.com/3d-models/bmw-m5-cs-f90-8f74fb3420e24213aaeea33dc99450a3"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 text-[10px] text-white/45 underline decoration-white/20 underline-offset-4 transition-colors hover:text-white/75"
-            >
-              {copy.modelCredit}
-            </a>
-          </section>
-        </div>
-
-        {/* ── Stage caption: FRONT (right side on desktop) ── */}
-        <div
-          ref={capFrontRef}
-          data-scroll-copy=""
-          style={{ opacity: 0 }}
-          className={`stage-caption-front absolute inset-x-5 bottom-28 max-w-[340px] transition-opacity duration-300 sm:inset-x-auto sm:bottom-auto sm:right-[clamp(24px,7vw,110px)] sm:top-[38%] sm:text-right ${
-            orbitMode || cockpitMode ? 'pointer-events-none opacity-0' : ''
-          }`}
-        >
-          <p className="stage-eyebrow m-0">{copy.frontEyebrow}</p>
-          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold text-white">{copy.frontTitle}</h2>
-          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/60">{copy.frontDescription}</p>
-        </div>
-
-        {/* ── Stage caption: REAR (left side on desktop) ── */}
-        <div
-          ref={capRearRef}
-          data-scroll-copy=""
-          style={{ opacity: 0 }}
-          className={`stage-caption-rear absolute inset-x-5 bottom-28 max-w-[340px] transition-opacity duration-300 sm:inset-x-auto sm:bottom-auto sm:left-[clamp(24px,7vw,110px)] sm:top-[38%] ${
-            orbitMode || cockpitMode ? 'pointer-events-none opacity-0' : ''
-          }`}
-        >
-          <p className="stage-eyebrow m-0">{copy.rearEyebrow}</p>
-          <h2 className="m-0 mt-2 text-[clamp(20px,3vw,32px)] font-semibold text-white">{copy.rearTitle}</h2>
-          <p className="m-0 mt-2 text-[13px] leading-relaxed text-white/60">{copy.rearDescription}</p>
-        </div>
-
-        {/* Engineering detail */}
-        <div
-          ref={xrayPanelRef}
-          data-scroll-copy=""
-          style={{ opacity: 0 }}
-          className={`xray-panel-position absolute inset-x-4 bottom-[96px] sm:inset-x-auto sm:bottom-auto sm:right-[clamp(20px,5vw,72px)] sm:top-1/2 sm:w-[340px] sm:-translate-y-1/2 transition-opacity duration-300 ${
-            orbitMode || cockpitMode ? 'pointer-events-none opacity-0' : ''
-          }`}
-        >
-          <div className="xray-panel border border-white/18 bg-[#090b0e]/95 p-4 sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="stage-eyebrow m-0">{copy.engineeringEyebrow}</p>
-              <span className="text-[10px] text-white/50">{copy.engineeringStatus}</span>
-            </div>
-            <h2 className="m-0 text-[clamp(17px,2.4vw,23px)] font-semibold leading-tight text-white">
-              {copy.engineeringTitle}
-            </h2>
-            <p className="m-0 mt-2 mb-4 hidden text-[12px] leading-relaxed text-white/55 sm:block">
-              {copy.engineeringDescription}
-            </p>
-            <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-1 sm:gap-y-2.5">
-              {SPEC_STATS.map((stat, index) => {
-                const value = xrayValues[index] ?? 0
-                const numberLocale = isArabic ? 'ar' : 'en'
-                const shown = value.toLocaleString(numberLocale, {
-                  minimumFractionDigits: stat.decimals ?? 0,
-                  maximumFractionDigits: stat.decimals ?? 0,
-                })
-                const percentage = stat.value > 0 ? Math.min(1, value / stat.value) : 0
-                return (
-                  <div key={stat.id} className="min-w-0">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <dt className="m-0 truncate text-[10px] text-white/50">{isArabic ? stat.labelAr : stat.label}</dt>
-                      <dd className="m-0 whitespace-nowrap font-mono text-[15px] font-semibold tabular-nums text-white sm:text-[16px]">
-                        {shown}<span className="ms-1 text-[10px] font-normal text-white/55">{stat.unit}</span>
-                      </dd>
-                    </div>
-                    <div className="mt-1 h-px w-full bg-white/10">
-                      <div className="h-px bg-[#d7193f] transition-[width] duration-100" style={{ width: `${percentage * stat.bar * 100}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </dl>
-          </div>
-        </div>
-
-        {/* ── Closing card ── */}
-        <div
-          ref={endCardRef}
-          data-scroll-copy=""
-          style={{ opacity: 0 }}
-          className={`absolute inset-0 flex flex-col items-center justify-center px-6 text-center transition-opacity duration-300 ${
-            orbitMode || cockpitMode ? 'opacity-0 pointer-events-none' : ''
-          }`}
-        >
-          <p className="stage-eyebrow m-0">{copy.closingEyebrow}</p>
-          <h2 className="m-0 mt-4 text-[clamp(26px,4.5vw,42px)] font-semibold text-white">{copy.closingTitle}</h2>
-          <button
-            type="button"
-            onClick={() => void handleShareBuild()}
-            className="editorial-cta pointer-events-auto mt-7 cursor-pointer"
-          >
-            <span>{shareMessage || copy.shareBuild}</span>
-            <svg
-              className="directional-arrow"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M4 12h15" />
-              <path d="M13.5 5.5 20 12l-6.5 6.5" />
-            </svg>
-          </button>
-        </div>
+        <div ref={heroLayerRef} aria-hidden="true" />
+        <div ref={capFrontRef} aria-hidden="true" />
+        <div ref={capRearRef} aria-hidden="true" />
+        <div ref={xrayPanelRef} aria-hidden="true" />
+        <div ref={endCardRef} aria-hidden="true" />
+        <div className="scene-label"><span>{isArabic ? 'الموقع' : 'LOCATION'}</span><strong>{isArabic ? SCENES.find(s => s.id === sceneId)?.nameAr : SCENES.find(s => s.id === sceneId)?.name}</strong></div>
 
         {/* ── Advanced Studio & Vehicle Configurator Dock ── */}
         <ConfiguratorDock
@@ -2453,6 +2220,7 @@ export default function ScrollExperience() {
           orbitMode={orbitMode}
           onToggleOrbit={handleOrbitToggle}
           sceneId={sceneId}
+          locationBusy={locationBusy}
           onSceneChange={handleSceneChange}
           cockpitMode={cockpitMode}
           onToggleCockpit={handleCockpitToggle}
@@ -2491,37 +2259,13 @@ export default function ScrollExperience() {
               <span aria-hidden="true">×</span>
             </button>
 
-            <p className="stage-eyebrow m-0 text-[#e8b766]">{copy.driveEyebrow}</p>
-            <h2 id="booking-title" className="m-0 mt-3 max-w-[390px] text-[clamp(24px,4vw,32px)] font-semibold leading-tight text-white">
-              {copy.driveTitle}
-            </h2>
-            <p id="booking-description" className="m-0 mt-4 text-[13px] leading-relaxed text-white/65">
-              {copy.driveDescription}
-            </p>
-
-            <dl className="m-0 mt-6 grid grid-cols-2 gap-3 border border-white/10 bg-white/[0.035] p-4">
-              <div>
-                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">{copy.paint}</dt>
-                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{isArabic ? PAINT_CONFIGS[paint].nameAr : PAINT_CONFIGS[paint].name}</dd>
-              </div>
-              <div>
-                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">{copy.wheels}</dt>
-                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{isArabic ? WHEEL_CONFIGS[wheelFinish].nameAr : WHEEL_CONFIGS[wheelFinish].name}</dd>
-              </div>
-              <div>
-                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">{copy.brakes}</dt>
-                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">{isArabic ? CALIPER_CONFIGS[caliperColor].nameAr : CALIPER_CONFIGS[caliperColor].name}</dd>
-              </div>
-              <div>
-                <dt className="text-[9px] uppercase tracking-[0.16em] text-white/40">{copy.location}</dt>
-                <dd className="m-0 mt-1 text-[12px] font-medium text-white/90">
-                  {isArabic
-                    ? SCENES.find((scene) => scene.id === sceneId)?.nameAr
-                    : SCENES.find((scene) => scene.id === sceneId)?.name}
-                </dd>
-              </div>
+            <h2 id="booking-title" className="m-0 text-2xl font-semibold">BMW M5 CS</h2>
+            <p id="booking-description" className="mt-2 text-sm text-white/60">4.4L twin-turbo V8 · F90</p>
+            <dl className="vehicle-facts">
+              <div><dt>{isArabic ? 'القوة' : 'Power'}</dt><dd>627 hp</dd></div>
+              <div><dt>{isArabic ? 'عزم الدوران' : 'Torque'}</dt><dd>750 Nm</dd></div>
+              <div><dt>0–100 km/h</dt><dd>3.0 s</dd></div>
             </dl>
-
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"

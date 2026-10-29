@@ -24,7 +24,7 @@ export const DEFAULT_BUILD_CONFIGURATION: BuildConfiguration = {
   caliperColor: 'red',
   sceneId: 'studio',
   theme: 'apex',
-  highBeams: true,
+  highBeams: false,
 }
 
 const PAINT_FINISHES = [

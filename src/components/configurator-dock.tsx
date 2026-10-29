@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { Disc3, Eye, MapPin, Orbit, RotateCcw, Share2, Sun } from 'lucide-react'
+import { randomLocation } from '@/lib/locations/photographic'
+import { useEffect, useState } from 'react'
+import { Disc3, Eye, MapPin, RotateCcw, Share2 } from 'lucide-react'
 import { useLocale } from '@/components/locale-provider'
 import { getSiteCopy } from '@/lib/site-copy'
 import {
@@ -32,13 +33,14 @@ interface ConfiguratorDockProps {
   shareMessage?: string
   orbitMode: boolean
   onToggleOrbit: () => void
+  locationBusy?: boolean
   sceneId: SceneId
   onSceneChange: (id: SceneId) => void
   cockpitMode: boolean
   onToggleCockpit: () => void
 }
 
-type Tab = 'paint' | 'wheels' | 'brakes' | 'studio' | 'scene'
+type Tab = 'customize' | 'view' | 'scene'
 type ConfigOption = { id: string; label: string; hex: string }
 
 function FinishOptions({
@@ -92,11 +94,18 @@ export default function ConfiguratorDock({
   orbitMode,
   onToggleOrbit,
   sceneId,
+  locationBusy = false,
   onSceneChange,
   cockpitMode,
   onToggleCockpit,
 }: ConfiguratorDockProps) {
   const [openTab, setOpenTab] = useState<Tab | null>(null)
+  useEffect(() => {
+    if (!openTab) return
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenTab(null) }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [openTab])
   const { locale, isArabic } = useLocale()
   const copy = getSiteCopy(locale)
   const selectedScene = SCENES.find((scene) => scene.id === sceneId) ?? SCENES[0]
@@ -127,9 +136,10 @@ export default function ConfiguratorDock({
     <div className="configurator-root">
       {openTab && (
         <aside id="customizer-panel" aria-label={copy.vehicleOptions} className="configurator-panel">
-          {openTab === 'paint' && (
+          <div className="panel-heading"><strong>{openTab === 'customize' ? (isArabic ? 'اجعلها سيارتك' : 'Make it yours') : openTab === 'scene' ? copy.location : (isArabic ? 'العرض والإضاءة' : 'View & lighting')}</strong><button type="button" onClick={() => setOpenTab(null)} aria-label={isArabic ? 'إغلاق' : 'Close'}>×</button></div>
+          {openTab === 'customize' && (
             <div className="flex flex-col items-center gap-3">
-              <span className="text-[12px] font-medium text-white/90">{finishName(paintOptions, paint)}</span>
+              <span className="text-[12px] font-medium text-white/90">{copy.paint} · {finishName(paintOptions, paint)}</span>
               <FinishOptions
                 options={paintOptions}
                 value={paint}
@@ -139,7 +149,7 @@ export default function ConfiguratorDock({
             </div>
           )}
 
-          {openTab === 'wheels' && (
+          {openTab === 'customize' && (
             <div className="flex min-w-[250px] flex-col items-center gap-3">
               <div className="text-center">
                 <p className="m-0 text-[11px] text-white/50">{copy.wheelFinishTitle}</p>
@@ -154,7 +164,7 @@ export default function ConfiguratorDock({
             </div>
           )}
 
-          {openTab === 'brakes' && (
+          {openTab === 'customize' && (
             <div className="flex min-w-[250px] flex-col items-center gap-3">
               <div className="text-center">
                 <p className="m-0 text-[11px] text-white/50">{copy.brakeCaliperTitle}</p>
@@ -169,7 +179,14 @@ export default function ConfiguratorDock({
             </div>
           )}
 
-          {openTab === 'studio' && (
+          {openTab === 'view' && (
+            <div className="view-options">
+              <button type="button" aria-pressed={orbitMode} onClick={onToggleOrbit}>360° · {copy.orbitView}</button>
+              <button type="button" aria-pressed={cockpitMode} onClick={onToggleCockpit}>{copy.cockpit}</button>
+            </div>
+          )}
+          {openTab === 'customize' && <button type="button" className="reset-option" onClick={onReset}><RotateCcw size={14} />{copy.resetBuild}</button>}
+          {openTab === 'view' && (
             <div className="flex min-w-[250px] flex-col items-center gap-3">
               <div className="flex items-center gap-1 border-b border-white/10 pb-3">
                 {(
@@ -192,17 +209,7 @@ export default function ConfiguratorDock({
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={onToggleHighBeams}
-                aria-pressed={highBeams}
-                className="flex items-center gap-3 text-[11px] text-white/75 hover:text-white"
-              >
-                <span>{copy.laserlights}</span>
-                <span className={`text-[10px] ${highBeams ? 'text-[#e15369]' : 'text-white/45'}`}>
-                  {highBeams ? copy.on : copy.off}
-                </span>
-              </button>
+
             </div>
           )}
 
@@ -214,7 +221,9 @@ export default function ConfiguratorDock({
                   {isArabic ? selectedScene.taglineAr : selectedScene.tagline}
                 </p>
               </div>
-              <div className="grid grid-cols-4 gap-1.5">
+              <p role="status" className="m-0 text-[11px] text-white/60">{locationBusy ? (isArabic ? 'جارٍ تجهيز الموقع…' : 'Preparing location…') : (isArabic ? 'اختر خلفية لسيارتك' : 'Choose a setting for your car')}</p>
+              <button type="button" disabled={locationBusy} className="random-location" onClick={() => onSceneChange(randomLocation(sceneId))}>{isArabic ? '↻ موقع عشوائي' : '↻ Surprise me'}</button>
+              <div className="grid grid-cols-2 gap-2" aria-busy={locationBusy}>
                 {SCENES.map((scene) => {
                   const selected = scene.id === sceneId
                   return (
@@ -222,129 +231,40 @@ export default function ConfiguratorDock({
                       key={scene.id}
                       type="button"
                       onClick={() => onSceneChange(scene.id)}
+                      disabled={locationBusy}
                       aria-label={`${isArabic ? scene.nameAr : scene.name} — ${isArabic ? scene.taglineAr : scene.tagline}`}
                       aria-pressed={selected}
                       title={isArabic ? scene.nameAr : scene.name}
-                      className={`flex min-w-0 flex-col items-start gap-1 border px-2 py-1.5 text-start transition-colors ${
+                      className={`location-card flex min-w-0 flex-col items-start gap-2 border p-3 text-start transition-colors ${
                         selected ? 'border-white/70 bg-white/10' : 'border-white/10 hover:border-white/35'
                       }`}
                     >
-                      <span className="h-1 w-5" style={{ background: scene.swatch }} />
-                      <span className="truncate text-[10px] text-white/80">
-                        {isArabic ? scene.nameAr : scene.name}
+                      <span className="location-swatch" style={{ background: scene.swatch }} aria-hidden="true" />
+                      <span className="truncate text-[12px] text-white/80">
+                        {isArabic ? scene.nameAr : scene.name}{selected ? ' ✓' : ''}
                       </span>
+                      <span className="text-[10px] leading-relaxed text-white/55">{isArabic ? scene.taglineAr : scene.tagline}</span>
                     </button>
                   )
                 })}
               </div>
+              <a className="text-[10px] text-white/45 underline" href="https://polyhaven.com" target="_blank" rel="noopener noreferrer">Environments · Poly Haven (CC0)</a>
             </div>
           )}
         </aside>
       )}
 
       <nav aria-label={copy.vehicleOptions} className="configurator-bar">
-        <button
-          type="button"
-          onClick={() => toggleTab('paint')}
-          aria-expanded={openTab === 'paint'}
-          aria-controls="customizer-panel"
-          className="config-control"
-          title={copy.paint}
-        >
-          <span className="h-3 w-3 rounded-full border border-white/35" style={{ backgroundColor: PAINT_CONFIGS[paint].hex }} />
-          <span className="hidden sm:inline">{copy.paint}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleTab('wheels')}
-          aria-expanded={openTab === 'wheels'}
-          aria-controls="customizer-panel"
-          className="config-control"
-          title={copy.wheels}
-        >
-          <Disc3 className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{copy.wheels}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleTab('brakes')}
-          aria-expanded={openTab === 'brakes'}
-          aria-controls="customizer-panel"
-          className="config-control"
-          title={copy.brakes}
-        >
-          <span className="h-3 w-3 rounded-full border border-white/35" style={{ backgroundColor: CALIPER_CONFIGS[caliperColor].hex }} />
-          <span className="hidden sm:inline">{copy.brakes}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleTab('studio')}
-          aria-expanded={openTab === 'studio'}
-          aria-controls="customizer-panel"
-          className="config-control"
-          title={copy.studioLighting}
-        >
-          <Sun className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{copy.studioLighting}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleTab('scene')}
-          aria-expanded={openTab === 'scene'}
-          aria-controls="customizer-panel"
-          className="config-control"
-          title={copy.locationScene}
-        >
-          <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{copy.locationScene}</span>
-        </button>
-
-        <span className="configurator-divider" aria-hidden="true" />
-
-        <button
-          type="button"
-          onClick={onToggleCockpit}
-          className="config-control"
-          title={copy.viewCockpit}
-          aria-label={copy.viewCockpit}
-          aria-pressed={cockpitMode}
-        >
-          <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{copy.cockpit}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onToggleOrbit}
-          className="config-control"
-          title={copy.orbitView}
-          aria-label={copy.orbitView}
-          aria-pressed={orbitMode}
-        >
-          <Orbit className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="text-[10px] font-semibold">360°</span>
-        </button>
-
-        <span className="configurator-divider" aria-hidden="true" />
-
-        <button
-          type="button"
-          onClick={onShare}
-          className="config-control config-control--share"
-          title={shareMessage || copy.shareBuild}
-          aria-label={shareMessage || copy.shareBuild}
-        >
-          <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{shareMessage || copy.shareBuild}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onReset}
-          className="config-control px-2"
-          title={copy.resetBuild}
-          aria-label={copy.resetBuild}
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        {([
+          { id: 'customize', label: isArabic ? 'تخصيص' : 'Customize', Icon: Disc3 },
+          { id: 'scene', label: copy.location, Icon: MapPin },
+          { id: 'view', label: isArabic ? 'العرض' : 'View', Icon: Eye },
+        ] as const).map(({id, label, Icon}) => (
+          <button key={id} type="button" className="config-control" onClick={() => toggleTab(id)} aria-expanded={openTab === id} aria-controls="customizer-panel">
+            <Icon size={17} aria-hidden="true" /><span>{label}</span>
+          </button>
+        ))}
+        <button type="button" onClick={onShare} className="config-control config-control--share" aria-label={shareMessage || copy.shareBuild}><Share2 size={17} aria-hidden="true" /><span>{isArabic ? 'مشاركة' : 'Share'}</span></button>
         <span className="sr-only" aria-live="polite">{shareMessage}</span>
       </nav>
     </div>

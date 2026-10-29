@@ -69,4 +69,5 @@ export const STUDIO_LIGHTING: LocationLighting = {
   environmentIntensity: 1.0,
   beamScale: 1.0,
   floorReflection: true,
+  shadow: { near: 3, far: 30, angle: 0.58, penumbra: 0.65 },
 }

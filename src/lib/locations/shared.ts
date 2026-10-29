@@ -45,7 +45,7 @@ export type Ctx = {
 export function makeCtx(mobile: boolean): Ctx {
   return {
     mobile,
-    heroRes: mobile ? 256 : 1024,
+    heroRes: mobile ? 256 : 512,
     propRes: mobile ? 128 : 256,
   }
 }
@@ -90,7 +90,7 @@ export type SkyOptions = {
 }
 
 export function makeSky(o: SkyOptions): THREE.CanvasTexture {
-  const w = o.width ?? (o.stars ? 2048 : 2048)
+  const w = o.width ?? 1024
   const h = w / 2
   const [canvas, ctx] = makeCanvas(w, h)
   const horizon = h * 0.5
