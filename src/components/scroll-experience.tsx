@@ -1849,6 +1849,14 @@ export default function ScrollExperience() {
     )
   }
 
+  const captionView = activeSection === 'specs' ? 'xray' : activeSection
+  const caption = {
+    overview: { label: isArabic ? 'نظرة عامة' : 'Overview', title: copy.heroTitle, description: copy.heroDescription },
+    performance: { label: isArabic ? 'المقدمة' : 'Front', title: copy.frontTitle, description: copy.frontDescription },
+    design: { label: isArabic ? 'المؤخرة' : 'Rear', title: copy.rearTitle, description: copy.rearDescription },
+    xray: { label: isArabic ? 'الجانب' : 'Side', title: copy.engineeringTitle, description: copy.engineeringDescription },
+  }[captionView]
+
   /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
 
   return (
@@ -1967,6 +1975,20 @@ export default function ScrollExperience() {
         <div ref={xrayPanelRef} aria-hidden="true" />
         <div ref={endCardRef} aria-hidden="true" />
         <div className="scene-label"><span>{isArabic ? 'الموقع' : 'LOCATION'}</span><strong>{isArabic ? SCENES.find(s => s.id === sceneId)?.nameAr : SCENES.find(s => s.id === sceneId)?.name}</strong></div>
+
+        <h1 className="sr-only">BMW M5 CS · {isArabic ? 'استوديو السيارة' : 'Vehicle Studio'}</h1>
+        {!orbitMode && !cockpitMode && (
+          <section className="view-caption pointer-events-auto" aria-labelledby="view-caption-title">
+            <div key={captionView} className="view-caption-copy" aria-live="polite" aria-atomic="true">
+              <span className="view-caption-label">{caption.label}</span>
+              <h2 id="view-caption-title">{caption.title}</h2>
+              <p>{caption.description}</p>
+            </div>
+            <button type="button" onClick={() => setShowBookingModal(true)} className="view-caption-details">
+              {isArabic ? 'عرض المواصفات' : 'View specifications'} <span aria-hidden="true">↗</span>
+            </button>
+          </section>
+        )}
 
         {/* ── Advanced Studio & Vehicle Configurator Dock ── */}
         <ConfiguratorDock
