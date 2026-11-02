@@ -1,20 +1,14 @@
 'use client'
 
-import { randomLocation } from '@/lib/locations/photographic'
 import { useEffect, useState } from 'react'
-import { Disc3, Eye, MapPin, RotateCcw, Share2 } from 'lucide-react'
+import { Button, Card, CardBody, Chip, Divider, Tooltip } from '@heroui/react'
+import { Disc3, Eye, MapPin, RotateCcw, Share2, Shuffle, X } from 'lucide-react'
+import { randomLocation } from '@/lib/locations/photographic'
 import { useLocale } from '@/components/locale-provider'
 import { getSiteCopy } from '@/lib/site-copy'
 import {
-  StudioTheme,
-  PaintFinish,
-  WheelFinish,
-  CaliperColor,
-  SceneId,
-  PAINT_CONFIGS,
-  WHEEL_CONFIGS,
-  CALIPER_CONFIGS,
-  SCENES,
+  type StudioTheme, type PaintFinish, type WheelFinish, type CaliperColor, type SceneId,
+  PAINT_CONFIGS, WHEEL_CONFIGS, CALIPER_CONFIGS, SCENES,
 } from '@/types/configurator'
 
 interface ConfiguratorDockProps {
@@ -39,234 +33,181 @@ interface ConfiguratorDockProps {
   cockpitMode: boolean
   onToggleCockpit: () => void
 }
-
 type Tab = 'customize' | 'view' | 'scene'
-type ConfigOption = { id: string; label: string; hex: string }
+type FinishOption = { hex: string; name: string; nameAr: string }
 
-function FinishOptions({
-  options,
-  value,
-  onChange,
-  label,
+function FinishOptions<T extends string>({
+  label, options, value, onChange, isArabic,
 }: {
-  options: ConfigOption[]
-  value: string
-  onChange: (id: string) => void
   label: string
+  options: Record<T, FinishOption>
+  value: T
+  onChange: (id: T) => void
+  isArabic: boolean
 }) {
+  const choice = options[value]
   return (
-    <div role="group" aria-label={label} className="flex items-center gap-3">
-      {options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          title={option.label}
-          aria-label={option.label}
-          aria-pressed={value === option.id}
-          className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-            value === option.id
-              ? 'border-white ring-1 ring-white/70 ring-offset-2 ring-offset-[#090b0e]'
-              : 'border-white/25 hover:border-white/70'
-          }`}
-        >
-          <span className="h-6 w-6 rounded-full border border-white/20" style={{ backgroundColor: option.hex }} />
-        </button>
-      ))}
+    <div className="flex flex-col gap-2" role="group" aria-label={label}>
+      <p className="text-xs font-medium text-white/85">
+        {label} · {isArabic ? choice.nameAr : choice.name}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {(Object.keys(options) as T[]).map((id) => (
+          <Tooltip key={id} content={isArabic ? options[id].nameAr : options[id].name}>
+            <Button
+              isIconOnly
+              radius="full"
+              variant="bordered"
+              aria-label={isArabic ? options[id].nameAr : options[id].name}
+              aria-pressed={id === value}
+              onPress={() => onChange(id)}
+              className={'h-10 w-10 min-w-10 border-white/25 bg-white/10 text-white ' + (id === value ? 'ring-2 ring-white ring-offset-2 ring-offset-[#101820]' : '')}
+            >
+              <span
+                className="h-6 w-6 rounded-full border border-white/25"
+                style={{ backgroundColor: options[id].hex }}
+              />
+            </Button>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   )
 }
 
-export default function ConfiguratorDock({
-  theme,
-  onThemeChange,
-  highBeams,
-  onToggleHighBeams,
-  paint,
-  onPaintChange,
-  wheelFinish,
-  onWheelChange,
-  caliperColor,
-  onCaliperChange,
-  onShare,
-  onReset,
-  shareMessage = '',
-  orbitMode,
-  onToggleOrbit,
-  sceneId,
-  locationBusy = false,
-  onSceneChange,
-  cockpitMode,
-  onToggleCockpit,
-}: ConfiguratorDockProps) {
+export default function ConfiguratorDock(p: ConfiguratorDockProps) {
   const [openTab, setOpenTab] = useState<Tab | null>(null)
+  const { locale, isArabic } = useLocale()
+  const c = getSiteCopy(locale)
+  const selectedScene = SCENES.find((scene) => scene.id === p.sceneId) ?? SCENES[0]
+  const toggle = (tab: Tab) => setOpenTab((current) => current === tab ? null : tab)
+
   useEffect(() => {
     if (!openTab) return
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenTab(null) }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenTab(null)
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
   }, [openTab])
-  const { locale, isArabic } = useLocale()
-  const copy = getSiteCopy(locale)
-  const selectedScene = SCENES.find((scene) => scene.id === sceneId) ?? SCENES[0]
 
-  const paintOptions = (Object.keys(PAINT_CONFIGS) as PaintFinish[]).map((id) => ({
-    id,
-    label: isArabic ? PAINT_CONFIGS[id].nameAr : PAINT_CONFIGS[id].name,
-    labelAr: PAINT_CONFIGS[id].nameAr,
-    hex: PAINT_CONFIGS[id].hex,
-  }))
-  const wheelOptions = (Object.keys(WHEEL_CONFIGS) as WheelFinish[]).map((id) => ({
-    id,
-    label: isArabic ? WHEEL_CONFIGS[id].nameAr : WHEEL_CONFIGS[id].name,
-    labelAr: WHEEL_CONFIGS[id].nameAr,
-    hex: WHEEL_CONFIGS[id].hex,
-  }))
-  const caliperOptions = (Object.keys(CALIPER_CONFIGS) as CaliperColor[]).map((id) => ({
-    id,
-    label: isArabic ? CALIPER_CONFIGS[id].nameAr : CALIPER_CONFIGS[id].name,
-    labelAr: CALIPER_CONFIGS[id].nameAr,
-    hex: CALIPER_CONFIGS[id].hex,
-  }))
-
-  const toggleTab = (tab: Tab) => setOpenTab((current) => (current === tab ? null : tab))
-  const finishName = (items: ConfigOption[], id: string) => items.find((item) => item.id === id)?.label ?? ''
+  const heading = openTab === 'customize'
+    ? (isArabic ? 'تخصيص السيارة' : 'Customize your car')
+    : openTab === 'scene' ? c.location : (isArabic ? 'العرض والإضاءة' : 'View & lighting')
 
   return (
-    <div className="configurator-root">
+    <div
+      className="pointer-events-auto fixed bottom-[max(16px,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-[min(440px,calc(100vw-24px))] -translate-x-1/2 flex-col gap-3 text-white"
+      dir={isArabic ? 'rtl' : 'ltr'}
+    >
       {openTab && (
-        <aside id="customizer-panel" aria-label={copy.vehicleOptions} className="configurator-panel">
-          <div className="panel-heading"><strong>{openTab === 'customize' ? (isArabic ? 'اجعلها سيارتك' : 'Make it yours') : openTab === 'scene' ? copy.location : (isArabic ? 'العرض والإضاءة' : 'View & lighting')}</strong><button type="button" onClick={() => setOpenTab(null)} aria-label={isArabic ? 'إغلاق' : 'Close'}>×</button></div>
-          {openTab === 'customize' && (
-            <div className="flex flex-col items-center gap-3">
-              <span className="text-[12px] font-medium text-white/90">{copy.paint} · {finishName(paintOptions, paint)}</span>
-              <FinishOptions
-                options={paintOptions}
-                value={paint}
-                onChange={(value) => onPaintChange(value as PaintFinish)}
-                label={copy.paint}
-              />
+        <Card
+          id="heroui-configurator-panel"
+          aria-label={c.vehicleOptions}
+          className="max-h-[min(65vh,540px)] overflow-auto border border-white/20 bg-[#101820]/85 shadow-2xl backdrop-blur-xl"
+          radius="lg"
+          shadow="lg"
+        >
+          <CardBody className="gap-4 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-white">{heading}</h2>
+              <Button isIconOnly size="sm" variant="light" aria-label={isArabic ? 'إغلاق' : 'Close'}
+                className="text-white" onPress={() => setOpenTab(null)}><X size={18} /></Button>
             </div>
-          )}
+            <Divider className="bg-white/15" />
 
-          {openTab === 'customize' && (
-            <div className="flex min-w-[250px] flex-col items-center gap-3">
-              <div className="text-center">
-                <p className="m-0 text-[11px] text-white/50">{copy.wheelFinishTitle}</p>
-                <p className="m-0 mt-1 text-[12px] font-medium text-white/90">{finishName(wheelOptions, wheelFinish)}</p>
-              </div>
-              <FinishOptions
-                options={wheelOptions}
-                value={wheelFinish}
-                onChange={(value) => onWheelChange(value as WheelFinish)}
-                label={copy.wheels}
-              />
-            </div>
-          )}
+            {openTab === 'customize' && (
+              <>
+                <FinishOptions label={c.paint} options={PAINT_CONFIGS} value={p.paint}
+                  onChange={p.onPaintChange} isArabic={isArabic} />
+                <FinishOptions label={c.wheelFinishTitle} options={WHEEL_CONFIGS} value={p.wheelFinish}
+                  onChange={p.onWheelChange} isArabic={isArabic} />
+                <FinishOptions label={c.brakeCaliperTitle} options={CALIPER_CONFIGS} value={p.caliperColor}
+                  onChange={p.onCaliperChange} isArabic={isArabic} />
+                <Button onPress={p.onReset} variant="flat" className="bg-white/10 text-white"
+                  startContent={<RotateCcw size={16} />}>{c.resetBuild}</Button>
+              </>
+            )}
 
-          {openTab === 'customize' && (
-            <div className="flex min-w-[250px] flex-col items-center gap-3">
-              <div className="text-center">
-                <p className="m-0 text-[11px] text-white/50">{copy.brakeCaliperTitle}</p>
-                <p className="m-0 mt-1 text-[12px] font-medium text-white/90">{finishName(caliperOptions, caliperColor)}</p>
-              </div>
-              <FinishOptions
-                options={caliperOptions}
-                value={caliperColor}
-                onChange={(value) => onCaliperChange(value as CaliperColor)}
-                label={copy.brakes}
-              />
-            </div>
-          )}
+            {openTab === 'view' && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button aria-pressed={p.orbitMode} onPress={p.onToggleOrbit}
+                    color={p.orbitMode ? 'primary' : 'default'} variant={p.orbitMode ? 'solid' : 'flat'}
+                    className={p.orbitMode ? '' : 'bg-white/10 text-white'}>360° · {c.orbitView}</Button>
+                  <Button aria-pressed={p.cockpitMode} onPress={p.onToggleCockpit}
+                    color={p.cockpitMode ? 'primary' : 'default'} variant={p.cockpitMode ? 'solid' : 'flat'}
+                    className={p.cockpitMode ? '' : 'bg-white/10 text-white'}>{c.cockpit}</Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { id: 'apex', label: c.themeApex },
+                    { id: 'm', label: c.themeMTrack },
+                    { id: 'night', label: c.themeNight },
+                  ] as const).map(({ id, label }) => (
+                    <Button key={id} size="sm" aria-pressed={p.theme === id}
+                      color={p.theme === id ? 'primary' : 'default'}
+                      variant={p.theme === id ? 'solid' : 'flat'}
+                      className={p.theme === id ? '' : 'bg-white/10 text-white'}
+                      onPress={() => p.onThemeChange(id)}>{label}</Button>
+                  ))}
+                </div>
+              </>
+            )}
 
-          {openTab === 'view' && (
-            <div className="view-options">
-              <button type="button" aria-pressed={orbitMode} onClick={onToggleOrbit}>360° · {copy.orbitView}</button>
-              <button type="button" aria-pressed={cockpitMode} onClick={onToggleCockpit}>{copy.cockpit}</button>
-            </div>
-          )}
-          {openTab === 'customize' && <button type="button" className="reset-option" onClick={onReset}><RotateCcw size={14} />{copy.resetBuild}</button>}
-          {openTab === 'view' && (
-            <div className="flex min-w-[250px] flex-col items-center gap-3">
-              <div className="flex items-center gap-1 border-b border-white/10 pb-3">
-                {(
-                  [
-                    { id: 'apex', label: copy.themeApex },
-                    { id: 'm', label: copy.themeMTrack },
-                    { id: 'night', label: copy.themeNight },
-                  ] as const
-                ).map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => onThemeChange(option.id)}
-                    aria-pressed={theme === option.id}
-                    className={`rounded-sm px-3 py-1.5 text-[11px] transition-colors ${
-                      theme === option.id ? 'bg-white text-black' : 'text-white/65 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-            </div>
-          )}
-
-          {openTab === 'scene' && (
-            <div className="flex w-full min-w-[260px] flex-col gap-3">
-              <div>
-                <p className="m-0 text-[12px] font-medium text-white/90">{isArabic ? selectedScene.nameAr : selectedScene.name}</p>
-                <p className="m-0 mt-1 text-[10px] text-white/50">
-                  {isArabic ? selectedScene.taglineAr : selectedScene.tagline}
-                </p>
-              </div>
-              <p role="status" className="m-0 text-[11px] text-white/60">{locationBusy ? (isArabic ? 'جارٍ تجهيز الموقع…' : 'Preparing location…') : (isArabic ? 'اختر خلفية لسيارتك' : 'Choose a setting for your car')}</p>
-              <button type="button" disabled={locationBusy} className="random-location" onClick={() => onSceneChange(randomLocation(sceneId))}>{isArabic ? '↻ موقع عشوائي' : '↻ Surprise me'}</button>
-              <div className="grid grid-cols-2 gap-2" aria-busy={locationBusy}>
-                {SCENES.map((scene) => {
-                  const selected = scene.id === sceneId
-                  return (
-                    <button
-                      key={scene.id}
-                      type="button"
-                      onClick={() => onSceneChange(scene.id)}
-                      disabled={locationBusy}
-                      aria-label={`${isArabic ? scene.nameAr : scene.name} — ${isArabic ? scene.taglineAr : scene.tagline}`}
-                      aria-pressed={selected}
-                      title={isArabic ? scene.nameAr : scene.name}
-                      className={`location-card flex min-w-0 flex-col items-start gap-2 border p-3 text-start transition-colors ${
-                        selected ? 'border-white/70 bg-white/10' : 'border-white/10 hover:border-white/35'
-                      }`}
-                    >
-                      <span className="location-swatch" style={{ background: scene.swatch }} aria-hidden="true" />
-                      <span className="truncate text-[12px] text-white/80">
-                        {isArabic ? scene.nameAr : scene.name}{selected ? ' ✓' : ''}
-                      </span>
-                      <span className="text-[10px] leading-relaxed text-white/55">{isArabic ? scene.taglineAr : scene.tagline}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <a className="text-[10px] text-white/45 underline" href="https://polyhaven.com" target="_blank" rel="noopener noreferrer">Environments · Poly Haven (CC0)</a>
-            </div>
-          )}
-        </aside>
+            {openTab === 'scene' && (
+              <>
+                <div>
+                  <p className="text-sm font-semibold text-white">{isArabic ? selectedScene.nameAr : selectedScene.name}</p>
+                  <p className="mt-1 text-xs text-white/60">{isArabic ? selectedScene.taglineAr : selectedScene.tagline}</p>
+                </div>
+                <Chip variant="flat" size="sm" className="bg-white/10 text-white/80">
+                  {p.locationBusy
+                    ? (isArabic ? 'جارٍ تجهيز الموقع…' : 'Preparing location…')
+                    : (isArabic ? 'اختر الموقع' : 'Choose a location')}
+                </Chip>
+                <Button isDisabled={p.locationBusy} variant="flat" className="bg-white/15 text-white"
+                  onPress={() => p.onSceneChange(randomLocation(p.sceneId))}
+                  startContent={<Shuffle size={16} />}>{isArabic ? 'موقع عشوائي' : 'Surprise me'}</Button>
+                <div className="grid grid-cols-2 gap-2" aria-busy={p.locationBusy}>
+                  {SCENES.map((scene) => (
+                    <Button key={scene.id} isDisabled={p.locationBusy} aria-pressed={scene.id === p.sceneId}
+                      onPress={() => p.onSceneChange(scene.id)} variant="bordered"
+                      className={'h-auto min-h-[84px] flex-col items-start gap-2 whitespace-normal border-white/20 p-3 text-start text-white ' + (scene.id === p.sceneId ? 'bg-white/20 ring-1 ring-white/60' : 'bg-white/5')}>
+                      <span className="h-5 w-full rounded-md" style={{ background: scene.swatch }} aria-hidden="true" />
+                      <span className="text-xs font-medium">{isArabic ? scene.nameAr : scene.name}{scene.id === p.sceneId ? ' ✓' : ''}</span>
+                    </Button>
+                  ))}
+                </div>
+                <a className="text-xs text-white/55 underline" href="https://polyhaven.com"
+                  rel="noopener noreferrer" target="_blank">Environments · Poly Haven (CC0)</a>
+              </>
+            )}
+          </CardBody>
+        </Card>
       )}
 
-      <nav aria-label={copy.vehicleOptions} className="configurator-bar">
-        {([
-          { id: 'customize', label: isArabic ? 'تخصيص' : 'Customize', Icon: Disc3 },
-          { id: 'scene', label: copy.location, Icon: MapPin },
-          { id: 'view', label: isArabic ? 'العرض' : 'View', Icon: Eye },
-        ] as const).map(({id, label, Icon}) => (
-          <button key={id} type="button" className="config-control" onClick={() => toggleTab(id)} aria-expanded={openTab === id} aria-controls="customizer-panel">
-            <Icon size={17} aria-hidden="true" /><span>{label}</span>
-          </button>
-        ))}
-        <button type="button" onClick={onShare} className="config-control config-control--share" aria-label={shareMessage || copy.shareBuild}><Share2 size={17} aria-hidden="true" /><span>{isArabic ? 'مشاركة' : 'Share'}</span></button>
-        <span className="sr-only" aria-live="polite">{shareMessage}</span>
-      </nav>
+      <Card className="border border-white/20 bg-[#101820]/65 shadow-2xl backdrop-blur-xl" radius="lg">
+        <CardBody className="flex-row items-center gap-1 p-2">
+          {([
+            { id: 'customize', label: isArabic ? 'تخصيص' : 'Customize', Icon: Disc3 },
+            { id: 'scene', label: c.location, Icon: MapPin },
+            { id: 'view', label: isArabic ? 'العرض' : 'View', Icon: Eye },
+          ] as const).map(({ id, label, Icon }) => (
+            <Button key={id} variant={openTab === id ? 'solid' : 'light'}
+              aria-expanded={openTab === id} aria-controls="heroui-configurator-panel"
+              onPress={() => toggle(id)}
+              className={'h-14 min-w-0 flex-1 flex-col gap-1 px-1 text-xs ' + (openTab === id ? 'bg-white/20 text-white' : 'text-white/85')}>
+              <Icon size={18} aria-hidden="true" />{label}
+            </Button>
+          ))}
+          <Button onPress={p.onShare} variant="flat"
+            className="h-14 min-w-0 flex-1 flex-col gap-1 bg-white/15 px-1 text-xs text-white">
+            <Share2 size={18} aria-hidden="true" />{isArabic ? 'مشاركة' : 'Share'}
+          </Button>
+        </CardBody>
+      </Card>
+      <span className="sr-only" role="status" aria-live="polite">{p.shareMessage}</span>
     </div>
   )
 }

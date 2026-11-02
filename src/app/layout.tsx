@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import LocaleProvider from '@/components/locale-provider'
+import AppHeroUIProvider from '@/components/heroui-provider'
 import './globals.css'
 
 const inter = localFont({
@@ -42,7 +43,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" dir="ltr" suppressHydrationWarning>
       <body className={`${inter.variable} ${plexSansArabic.variable} antialiased`}>
-        <LocaleProvider>{children}</LocaleProvider>
+        <AppHeroUIProvider><LocaleProvider>{children}</LocaleProvider></AppHeroUIProvider>
       </body>
     </html>
   )
