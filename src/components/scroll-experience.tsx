@@ -57,7 +57,6 @@ import { useLocale } from '@/components/locale-provider'
 import { getSiteCopy } from '@/lib/site-copy'
 import { detectWebGL } from '@/lib/webgl-support'
 import { createStudioCove, studioPalette } from '@/lib/studio'
-import { randomLocation } from '@/lib/locations/photographic'
 import { buildLocationScene, STUDIO_LIGHTING, type LocationLighting, type LocationScene } from '@/lib/locations'
 
 export type { StudioTheme, PaintFinish, WheelFinish, CaliperColor }
@@ -616,10 +615,11 @@ export default function ScrollExperience() {
   const xrayProgressRef = useRef(0)
 
   const [locationBusy, setLocationBusy] = useState(false)
+  const [locationFailed, setLocationFailed] = useState(false)
   const [buildConfiguration, setBuildConfiguration] = useState<BuildConfiguration>(() =>
     ({ ...getInitialBuildConfiguration(), highBeams: false,
       sceneId: typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('scene')
-        ? getInitialBuildConfiguration().sceneId : randomLocation() }),
+        ? getInitialBuildConfiguration().sceneId : 'studio' }),
   )
   const { theme, highBeams, paint, wheelFinish, caliperColor, sceneId } = buildConfiguration
   const [hoodOpen, setHoodOpen] = useState(false)
@@ -1123,13 +1123,20 @@ export default function ScrollExperience() {
     }
 
     let locationRequestSequence = 0
+    let locationController: AbortController | null = null
     let requestedLocationId: SceneId | null = null
     const setLocation = async (id: SceneId, instant = false) => {
       if (requestedLocationId === id) return
       // Clicking the currently active location cancels an in-flight swap.
       const requestId = ++locationRequestSequence
+      locationController?.abort()
+      locationController = new AbortController()
+      const controller = locationController
+      const timeout = window.setTimeout(() => controller.abort(new Error('Location download timed out')), 10000)
+      setLocationFailed(false)
       requestedLocationId = id
       if ((activeLocation?.id ?? 'studio') === id) {
+        window.clearTimeout(timeout)
         setLocationBusy(false)
         requestedLocationId = null
         return
@@ -1139,20 +1146,23 @@ export default function ScrollExperience() {
       let next: LocationScene | null = null
       try {
         setLocationBusy(true)
-        // Allow the loading indicator to paint before procedural work begins.
-        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+        // Fetch immediately; photographic locations do not need a render-frame
+        // gate, which can stall when the tab is hidden or frames are throttled.
         if (disposed || requestId !== locationRequestSequence) return
-        next = locationCache.get(id) ?? await buildLocationScene(id, { mobile })
-        if (next && !locationCache.has(id)) await renderer.compileAsync(next.group, camera, scene)
+        next = locationCache.get(id) ?? await buildLocationScene(id, { mobile, signal: controller.signal })
+        controller.signal.throwIfAborted()
       } catch (err) {
         if (next && !locationCache.has(id)) next.dispose()
         if (disposed || requestId !== locationRequestSequence) return
         requestedLocationId = null
         setLocationBusy(false)
+        setLocationFailed(true)
         const fallbackId = activeLocation?.id ?? 'studio'
         setBuildConfiguration((current) => ({ ...current, sceneId: fallbackId }))
         console.warn('[scroll-experience] location build failed; keeping the current environment:', err)
         return
+      } finally {
+        window.clearTimeout(timeout)
       }
 
       if (disposed || requestId !== locationRequestSequence) {
@@ -1614,6 +1624,10 @@ export default function ScrollExperience() {
       tl.to(cam, { ...K.outro, duration: P.outroIn - P.outroStart }, P.outroStart)
       tl.fromTo(endCard, { autoAlpha: 0, y: 28, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.08, ease: 'power2.out' }, 0.92)
 
+      // A breakpoint rebuild must restore the current chapter even if the
+      // scroll position did not change (for example after rotating a phone).
+      const scrollRange = track.offsetHeight - window.innerHeight
+      tl.progress(scrollRange > 0 ? THREE.MathUtils.clamp(window.scrollY / scrollRange, 0, 1) : 0)
       return tl
     }
 
@@ -1734,6 +1748,7 @@ export default function ScrollExperience() {
       reflectionCache.clear()
       locationEnv = null
       locationRequestSequence += 1
+      locationController?.abort()
       requestedLocationId = null
       modelRequestController?.abort()
       lenisInstanceRef.current = null
@@ -1849,14 +1864,6 @@ export default function ScrollExperience() {
     )
   }
 
-  const captionView = activeSection === 'specs' ? 'xray' : activeSection
-  const caption = {
-    overview: { label: isArabic ? 'نظرة عامة' : 'Overview', title: copy.heroTitle, description: copy.heroDescription },
-    performance: { label: isArabic ? 'المقدمة' : 'Front', title: copy.frontTitle, description: copy.frontDescription },
-    design: { label: isArabic ? 'المؤخرة' : 'Rear', title: copy.rearTitle, description: copy.rearDescription },
-    xray: { label: isArabic ? 'الجانب' : 'Side', title: copy.engineeringTitle, description: copy.engineeringDescription },
-  }[captionView]
-
   /* ═══════════════════ Overlay markup (fixed stage) ═══════════════════ */
 
   return (
@@ -1868,7 +1875,7 @@ export default function ScrollExperience() {
       data-immersive={orbitMode || cockpitMode ? 'true' : undefined}
     >
       {/*
-        Invisible scroll track — its height (560vh) is the scroll distance
+        Invisible scroll track — its height (360vh) is the scroll distance
         ScrollTrigger scrubs the camera timeline through. Fully reversible.
       */}
       <div ref={trackRef} aria-hidden="true" className="h-[360vh]" />
@@ -1918,6 +1925,7 @@ export default function ScrollExperience() {
       )}
 
       {locationBusy && <div role="status" className="location-status">{isArabic ? 'جارٍ تجهيز الموقع…' : 'Preparing location…'}</div>}
+      {locationFailed && !locationBusy && <div role="status" className="location-status">{isArabic ? 'تعذر تحميل الموقع. بقي العرض الحالي؛ اختر الموقع للمحاولة مجددًا.' : 'Location could not load. Current view kept; select the location to retry.'}</div>}
       {/* Fixed UI overlay */}
       <div className="pointer-events-none fixed inset-0 z-10">
         <header className="site-header pointer-events-auto fixed inset-x-0 top-0 z-30 flex items-center justify-between px-[clamp(20px,5vw,64px)] py-3">
@@ -1969,26 +1977,50 @@ export default function ScrollExperience() {
           </div>
         </header>
 
-        <div ref={heroLayerRef} aria-hidden="true" />
-        <div ref={capFrontRef} aria-hidden="true" />
-        <div ref={capRearRef} aria-hidden="true" />
-        <div ref={xrayPanelRef} aria-hidden="true" />
-        <div ref={endCardRef} aria-hidden="true" />
-        <div className="scene-label"><span>{isArabic ? 'الموقع' : 'LOCATION'}</span><strong>{isArabic ? SCENES.find(s => s.id === sceneId)?.nameAr : SCENES.find(s => s.id === sceneId)?.name}</strong></div>
+        <div className="story-overlays" inert={orbitMode || cockpitMode || modelStatus.phase !== 'ready'}>
+          <div ref={heroLayerRef} className="story-hero">
+            <section className="story-hero-copy" aria-labelledby="story-hero-title">
+              <p className="story-eyebrow">{copy.heroEyebrow}</p>
+              <h1 id="story-hero-title" className="story-title">{copy.heroTitle}</h1>
+              <p className="story-description">{copy.heroDescription}</p>
+              <button type="button" onClick={() => scrollToSection('performance')} className="story-action">
+                {isArabic ? 'اكتشف M5 CS' : 'Explore the M5 CS'} <span aria-hidden="true">↗</span>
+              </button>
+            </section>
+          </div>
 
-        <h1 className="sr-only">BMW M5 CS · {isArabic ? 'استوديو السيارة' : 'Vehicle Studio'}</h1>
-        {!orbitMode && !cockpitMode && (
-          <section className="view-caption pointer-events-auto" aria-labelledby="view-caption-title">
-            <div key={captionView} className="view-caption-copy" aria-live="polite" aria-atomic="true">
-              <span className="view-caption-label">{caption.label}</span>
-              <h2 id="view-caption-title">{caption.title}</h2>
-              <p>{caption.description}</p>
-            </div>
-            <button type="button" onClick={() => setShowBookingModal(true)} className="view-caption-details">
+          <div ref={capFrontRef} className="story-caption story-caption--front" style={{ opacity: 0, visibility: 'hidden' }}>
+            <p className="story-eyebrow">{copy.frontEyebrow}</p>
+            <h2 className="story-title">{copy.frontTitle}</h2>
+            <p className="story-description">{copy.frontDescription}</p>
+          </div>
+
+          <div ref={capRearRef} className="story-caption story-caption--rear" style={{ opacity: 0, visibility: 'hidden' }}>
+            <p className="story-eyebrow">{copy.rearEyebrow}</p>
+            <h2 className="story-title">{copy.rearTitle}</h2>
+            <p className="story-description">{copy.rearDescription}</p>
+          </div>
+
+          <div ref={xrayPanelRef} className="story-caption story-caption--side" style={{ opacity: 0, visibility: 'hidden' }}>
+            <p className="story-eyebrow">{copy.engineeringEyebrow}</p>
+            <h2 className="story-title">{copy.engineeringTitle}</h2>
+            <p className="story-description">{copy.engineeringDescription}</p>
+            <button type="button" onClick={() => setShowBookingModal(true)} className="story-details">
               {isArabic ? 'عرض المواصفات' : 'View specifications'} <span aria-hidden="true">↗</span>
             </button>
-          </section>
-        )}
+          </div>
+
+          <div ref={endCardRef} className="story-outro" style={{ opacity: 0, visibility: 'hidden' }}>
+            <section className="story-outro-copy" aria-labelledby="story-outro-title">
+              <p className="story-eyebrow">{copy.closingEyebrow}</p>
+              <h2 id="story-outro-title" className="story-title">{copy.closingTitle}</h2>
+              <button type="button" onClick={() => setShowBookingModal(true)} className="story-action">
+                {isArabic ? 'عرض المواصفات' : 'View specifications'} <span aria-hidden="true">↗</span>
+              </button>
+            </section>
+          </div>
+        </div>
+        <div className="scene-label"><span>{isArabic ? 'الموقع' : 'LOCATION'}</span><strong>{isArabic ? SCENES.find(s => s.id === sceneId)?.nameAr : SCENES.find(s => s.id === sceneId)?.name}</strong></div>
 
         {/* ── Advanced Studio & Vehicle Configurator Dock ── */}
         <ConfiguratorDock
