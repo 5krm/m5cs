@@ -5,6 +5,7 @@ import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 
 const directory = 'public/environments';
 const names = ['mountain-road', 'city-parking', 'sunset-avenue'];
+const generatorStamp = (await fs.stat(new URL(import.meta.url))).mtimeMs;
 
 // Retain HDR lighting and the original files; ship a smaller panorama to browsers.
 function encodeScanline(channel) {
@@ -32,12 +33,12 @@ function encodeScanline(channel) {
 }
 
 for (const name of names) {
- for (const scale of [2, 4]) {
+ for (const scale of [2, 8]) {
   const input = path.join(directory, `${name}.hdr`);
   const output = path.join(directory, `${name}-${scale === 2 ? '1k' : 'preview'}.hdr`);
   const original = await fs.stat(input);
   const existing = await fs.stat(output).catch(() => null);
-  if (existing && existing.mtimeMs >= original.mtimeMs) continue;
+  if (existing && existing.mtimeMs >= Math.max(original.mtimeMs, generatorStamp)) continue;
   const bytes = await fs.readFile(input);
   const image = new HDRLoader().setDataType(FloatType).parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   const width = image.width / scale;

@@ -37,10 +37,10 @@ test('browser panoramas preserve HDR data within the loading budget', () => {
     assert.ok(image.data)
     assert.equal(image.data.length, 1024 * 512 * 4)
     const preview = readFileSync(`public/environments/${PHOTO_LOCATIONS[id].file}-preview.hdr`)
-    assert.ok(preview.length < original.length / 12, `${id} first view must be at least twelve times smaller`)
+    assert.ok(preview.length < original.length / 40, `${id} first view must be at least forty times smaller`)
     const firstView = new HDRLoader().parse(preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength))
-    assert.equal(firstView.width, 512)
-    assert.equal(firstView.height, 256)
+    assert.equal(firstView.width, 256)
+    assert.equal(firstView.height, 128)
   }
 })
 
@@ -68,7 +68,7 @@ test('location loading forwards cancellation and uses the small panorama', async
     const location = await buildPhotographicLocation('alpine', false, controller.signal)
     assert.equal(requestedUrl, '/environments/mountain-road-preview.hdr')
     assert.ok(location.environment instanceof DataTexture)
-    assert.equal(location.environment.image.width, 512)
+    assert.equal(location.environment.image.width, 256)
     location.dispose()
   } finally {
     globalThis.fetch = originalFetch
